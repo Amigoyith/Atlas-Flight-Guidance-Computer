@@ -5,6 +5,7 @@
  * Major functions:
  * - AtlasMs5611_Init(): validates the only available identity evidence, PROM CRC-4.
  * - AtlasMs5611_Read(): runs D2 then D1 with conservative conversion delays.
+ * - AtlasMs5611_StartSample()/PollSample(): the same sequence without blocking.
  * - AtlasMs5611_Compensate(): prevents overflow with signed 64-bit intermediates.
  */
 
@@ -119,37 +120,15 @@ static bool atlas_ms5611_osr_parameters(AtlasMs5611Osr osr,
 }
 
 /**
- * @brief Trigger one ADC conversion and read its 24-bit result.
+ * @brief Read one completed 24-bit conversion result.
  * @param sensor Driver instance.
- * @param base_command D1 or D2 conversion base command.
- * @param osr Oversampling selection.
- * @param value Destination 24-bit conversion.
- * @return ATLAS_OK or typed transport/parameter failure.
+ * @param value Destination 24-bit value.
+ * @return ATLAS_OK or typed transport failure.
  */
-static AtlasStatus atlas_ms5611_convert(AtlasMs5611 *sensor,
-                                        uint8_t base_command,
-                                        AtlasMs5611Osr osr,
-                                        uint32_t *value)
+static AtlasStatus atlas_ms5611_read_adc(AtlasMs5611 *sensor, uint32_t *value)
 {
-    uint8_t command_offset = 0U;
-    uint32_t wait_ms = 0U;
     uint8_t bytes[3] = {0U};
-    AtlasStatus status;
-
-    if (!atlas_ms5611_osr_parameters(osr, &command_offset, &wait_ms))
-    {
-        return ATLAS_ERROR_ARGUMENT;
-    }
-
-    status = atlas_ms5611_command(sensor, (uint8_t)(base_command + command_offset));
-    if (status != ATLAS_OK)
-    {
-        return status;
-    }
-    /* Rounded-up waits exceed the maximum conversion times in the TE data sheet. */
-    AtlasTime_DelayMs(wait_ms);
-
-    status = atlas_ms5611_command(sensor, MS5611_COMMAND_ADC_READ);
+    AtlasStatus status = atlas_ms5611_command(sensor, MS5611_COMMAND_ADC_READ);
     if (status == ATLAS_OK)
     {
         status = atlas_ms5611_from_hal(sensor,
@@ -166,6 +145,38 @@ static AtlasStatus atlas_ms5611_convert(AtlasMs5611 *sensor,
                  bytes[2];
     }
     return status;
+}
+
+/**
+ * @brief Trigger one ADC conversion and read its 24-bit result.
+ * @param sensor Driver instance.
+ * @param base_command D1 or D2 conversion base command.
+ * @param osr Oversampling selection.
+ * @param value Destination 24-bit conversion.
+ * @return ATLAS_OK or typed transport/parameter failure.
+ */
+static AtlasStatus atlas_ms5611_convert(AtlasMs5611 *sensor,
+                                        uint8_t base_command,
+                                        AtlasMs5611Osr osr,
+                                        uint32_t *value)
+{
+    uint8_t command_offset = 0U;
+    uint32_t wait_ms = 0U;
+    AtlasStatus status;
+
+    if (!atlas_ms5611_osr_parameters(osr, &command_offset, &wait_ms))
+    {
+        return ATLAS_ERROR_ARGUMENT;
+    }
+
+    status = atlas_ms5611_command(sensor, (uint8_t)(base_command + command_offset));
+    if (status != ATLAS_OK)
+    {
+        return status;
+    }
+    /* Rounded-up waits exceed the maximum conversion times in the TE data sheet. */
+    AtlasTime_DelayMs(wait_ms);
+    return atlas_ms5611_read_adc(sensor, value);
 }
 
 /**
@@ -377,7 +388,153 @@ AtlasStatus AtlasMs5611_Read(AtlasMs5611 *sensor,
     if (status == ATLAS_OK)
     {
         sample->timestamp_ms = HAL_GetTick();
+        sample->timestamp_us = AtlasTime_NowUs();
         ++sensor->health.samples_read;
+    }
+    return status;
+}
+
+/**
+ * @brief Issue one conversion command and record when it started.
+ * @param sensor Driver instance.
+ * @param base_command D1 or D2 base command.
+ * @param osr Validated oversampling.
+ * @return ATLAS_OK or typed failure.
+ */
+static AtlasStatus atlas_ms5611_start_phase(AtlasMs5611 *sensor,
+                                            uint8_t base_command,
+                                            AtlasMs5611Osr osr)
+{
+    uint8_t command_offset = 0U;
+    uint32_t wait_ms = 0U;
+
+    if (!atlas_ms5611_osr_parameters(osr, &command_offset, &wait_ms))
+    {
+        return ATLAS_ERROR_ARGUMENT;
+    }
+    sensor->phase_started_ms = HAL_GetTick();
+    sensor->phase_started_us = AtlasTime_NowUs();
+    return atlas_ms5611_command(sensor, (uint8_t)(base_command + command_offset));
+}
+
+/**
+ * @brief Report whether the current conversion's worst-case time has elapsed.
+ * @param sensor Driver instance with a phase in progress.
+ * @param wait_ms Rounded-up conversion time for the phase OSR.
+ * @return true when the ADC result may be read.
+ */
+static bool atlas_ms5611_phase_elapsed(const AtlasMs5611 *sensor, uint32_t wait_ms)
+{
+    if (AtlasTime_MicrosecondsAvailable())
+    {
+        return (uint32_t)(AtlasTime_NowUs() - sensor->phase_started_us) >= (wait_ms * 1000U);
+    }
+    /* A millisecond tick difference of N may span only N-1 ms; add one tick. */
+    return (uint32_t)(HAL_GetTick() - sensor->phase_started_ms) > wait_ms;
+}
+
+/**
+ * @brief Begin a temperature-then-pressure sample without waiting.
+ * @param sensor Initialized, idle driver instance.
+ * @param osr Oversampling for both conversions.
+ * @return ATLAS_OK, ATLAS_ERROR_STATE while busy, or a typed failure.
+ */
+AtlasStatus AtlasMs5611_StartSample(AtlasMs5611 *sensor, AtlasMs5611Osr osr)
+{
+    AtlasStatus status;
+
+    if (sensor == NULL)
+    {
+        return ATLAS_ERROR_NULL;
+    }
+    if (!sensor->initialized)
+    {
+        return ATLAS_ERROR_NOT_READY;
+    }
+    if (sensor->phase != ATLAS_MS5611_PHASE_IDLE)
+    {
+        return ATLAS_ERROR_STATE;
+    }
+    status = atlas_ms5611_start_phase(sensor, MS5611_COMMAND_CONVERT_D2, osr);
+    if (status == ATLAS_OK)
+    {
+        sensor->phase_osr = osr;
+        sensor->phase = ATLAS_MS5611_PHASE_TEMPERATURE;
+    }
+    return status;
+}
+
+/**
+ * @brief Advance a started sample by at most one bus step.
+ * @param sensor Driver instance with a sample in progress.
+ * @param sample Destination written on completion.
+ * @param complete Destination completion flag.
+ * @return ATLAS_OK, ATLAS_ERROR_STATE when idle, or a typed failure (driver idles).
+ */
+AtlasStatus AtlasMs5611_PollSample(AtlasMs5611 *sensor,
+                                   AtlasMs5611Sample *sample,
+                                   bool *complete)
+{
+    uint8_t command_offset = 0U;
+    uint32_t wait_ms = 0U;
+    uint32_t value = 0U;
+    AtlasStatus status;
+
+    if ((sensor == NULL) || (sample == NULL) || (complete == NULL))
+    {
+        return ATLAS_ERROR_NULL;
+    }
+    *complete = false;
+    if (sensor->phase == ATLAS_MS5611_PHASE_IDLE)
+    {
+        return ATLAS_ERROR_STATE;
+    }
+    if (!atlas_ms5611_osr_parameters(sensor->phase_osr, &command_offset, &wait_ms))
+    {
+        sensor->phase = ATLAS_MS5611_PHASE_IDLE;
+        return ATLAS_ERROR_ARGUMENT;
+    }
+    if (!atlas_ms5611_phase_elapsed(sensor, wait_ms))
+    {
+        return ATLAS_OK;
+    }
+
+    status = atlas_ms5611_read_adc(sensor, &value);
+    /* The data sheet returns 0 for a read without a completed conversion. */
+    if ((status == ATLAS_OK) && (value == 0U))
+    {
+        status = ATLAS_ERROR_PROTOCOL;
+    }
+    if (status != ATLAS_OK)
+    {
+        sensor->phase = ATLAS_MS5611_PHASE_IDLE;
+        return status;
+    }
+
+    if (sensor->phase == ATLAS_MS5611_PHASE_TEMPERATURE)
+    {
+        sensor->pending_d2 = value;
+        status = atlas_ms5611_start_phase(sensor, MS5611_COMMAND_CONVERT_D1, sensor->phase_osr);
+        sensor->phase = (status == ATLAS_OK) ? ATLAS_MS5611_PHASE_PRESSURE :
+                                               ATLAS_MS5611_PHASE_IDLE;
+        return status;
+    }
+
+    sensor->phase = ATLAS_MS5611_PHASE_IDLE;
+    sample->raw_temperature_d2 = sensor->pending_d2;
+    sample->raw_pressure_d1 = value;
+    status = AtlasMs5611_Compensate(sensor->prom,
+                                    sample->raw_pressure_d1,
+                                    sample->raw_temperature_d2,
+                                    &sample->pressure_pa,
+                                    &sample->temperature_centi_c);
+    if (status == ATLAS_OK)
+    {
+        sample->timestamp_ms = HAL_GetTick();
+        sample->timestamp_us = AtlasTime_MicrosecondsAvailable() ?
+            (sensor->phase_started_us + ((wait_ms * 1000U) / 2U)) : 0U;
+        ++sensor->health.samples_read;
+        *complete = true;
     }
     return status;
 }

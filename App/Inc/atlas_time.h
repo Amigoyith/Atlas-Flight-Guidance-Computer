@@ -5,11 +5,13 @@
  * Major functions:
  * - AtlasTime_DelayMs(): yields the running RTOS task or uses HAL timing before startup.
  * - AtlasTime_StartCounter(): owns idempotent startup of the shared BNO/GNSS counter.
+ * - AtlasTime_UseMicrosecondCounter()/NowUs(): expose that counter as the sample timebase.
  */
 
 #ifndef ATLAS_TIME_H
 #define ATLAS_TIME_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "main.h"
 #include "atlas_status.h"
@@ -34,6 +36,27 @@ void AtlasTime_DelayMs(uint32_t delay_ms);
  *       set. Never stops, reinitializes, or clears a shared timer or capture channel.
  */
 AtlasStatus AtlasTime_StartCounter(TIM_HandleTypeDef *timer);
+
+/**
+ * @brief Start (idempotently) and register the shared 1 MHz, 32-bit sample timebase.
+ * @param timer Free-running TIM2 handle: prescaler for 1 MHz and a 0xFFFFFFFF period.
+ * @return ATLAS_OK or the AtlasTime_StartCounter() failure; no timebase on failure.
+ * @note Startup/sole-owner context only. The counter wraps every ~71.6 minutes;
+ *       consumers must compare timestamps with unsigned subtraction.
+ */
+AtlasStatus AtlasTime_UseMicrosecondCounter(TIM_HandleTypeDef *timer);
+
+/**
+ * @brief Report whether AtlasTime_NowUs() returns a running microsecond count.
+ * @return true after a successful AtlasTime_UseMicrosecondCounter().
+ */
+bool AtlasTime_MicrosecondsAvailable(void);
+
+/**
+ * @brief Read the shared microsecond timebase; safe from tasks and ISRs.
+ * @return Current count, or 0 when no timebase is registered.
+ */
+uint32_t AtlasTime_NowUs(void);
 
 #ifdef __cplusplus
 }

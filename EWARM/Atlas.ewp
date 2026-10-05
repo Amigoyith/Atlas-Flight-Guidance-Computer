@@ -1111,7 +1111,9 @@
         <file><name>$PROJ_DIR$/../App/Src/atlas_boot.c</name></file>
         <file><name>$PROJ_DIR$/atlas_boot_branch.s</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_buzzer.c</name></file>
+        <file><name>$PROJ_DIR$/../App/Src/atlas_clock_map.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_gnss.c</name></file>
+        <file><name>$PROJ_DIR$/../App/Src/atlas_imu_stream.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_led.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_lsm6dsv16b.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_mmc5983ma.c</name></file>
@@ -1123,6 +1125,7 @@
         <file><name>$PROJ_DIR$/../App/Src/atlas_rfd900x.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_rtos.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_rtos_policy.c</name></file>
+        <file><name>$PROJ_DIR$/../App/Src/atlas_sample_ring.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_spi_device.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_status.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_time.c</name></file>

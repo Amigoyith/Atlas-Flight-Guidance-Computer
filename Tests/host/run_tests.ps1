@@ -14,6 +14,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $testOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-protocol-tests.exe'
 $sh2Output = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-sh2-timeout-tests.exe'
 $bnoCevaOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-bno-ceva-tests.exe'
+$samplePathOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-sample-path-tests.exe'
 
 $sources = @(
     'Tests/host/test_protocols.c',
@@ -22,6 +23,7 @@ $sources = @(
     'App/Src/atlas_adxl375.c',
     'App/Src/atlas_ble.c',
     'App/Src/atlas_bno085.c',
+    'App/Src/atlas_clock_map.c',
     'App/Src/atlas_buzzer.c',
     'App/Src/atlas_gnss.c',
     'App/Src/atlas_led.c',
@@ -67,6 +69,28 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 & $bnoCevaOutput
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& gcc -std=c11 -Wall -Wextra -Werror `
+    -I (Join-Path $repoRoot 'Tests/host/mocks') `
+    -I (Join-Path $repoRoot 'App/Inc') `
+    (Join-Path $repoRoot 'Tests/host/test_sample_path.c') `
+    (Join-Path $repoRoot 'Tests/host/test_hal_stubs.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_clock_map.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_lsm6dsv16b.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_mmc5983ma.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_ms5611.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_sample_ring.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_spi_device.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_status.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_time.c') -lm -o $samplePathOutput
+if ($LASTEXITCODE -ne 0) {
+    throw "Sample-path test compilation failed with exit code $LASTEXITCODE."
+}
+
+& $samplePathOutput
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

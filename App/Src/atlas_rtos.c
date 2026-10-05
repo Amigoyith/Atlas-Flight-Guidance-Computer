@@ -14,6 +14,8 @@
 
 #include "atlas_rtos.h"
 #include "atlas_build.h"
+#include "atlas_imu_stream.h"
+#include "atlas_sample_ring.h"
 #include "atlas_storage.h"
 #include "atlas_usb.h"
 #include "atlas_io.h"
@@ -40,7 +42,8 @@
 #define ATLAS_RTOS_SUPERVISOR_PERIOD_MS          (100U)
 #define ATLAS_RTOS_ADXL_PERIOD_MS                   (2U)
 #define ATLAS_RTOS_LSM_PERIOD_MS                    (5U)
-#define ATLAS_RTOS_MMC_PERIOD_MS                   (50U)
+#define ATLAS_RTOS_MMC_PERIOD_MS                   (10U)
+#define ATLAS_RTOS_MMC_TIMEOUT_MS                  (10U)
 #define ATLAS_RTOS_MS5611_PERIOD_MS               (100U)
 #define ATLAS_RTOS_IO_CYCLE_DEADLINE_MS            (20U)
 #define ATLAS_RTOS_RADIO_MODE_DEADLINE_MS         (2200U)
@@ -107,9 +110,21 @@ typedef struct
     AtlasRtosMaintenanceReply pending_reply;
     uint32_t started_at_ms;
     bool resources_ready;
+    /* Publication to the estimation rings starts at the consumer's first read. */
+    volatile bool imu_consumer_attached;
+    volatile bool mag_consumer_attached;
+    bool imu_stream_ready;
+    uint32_t mag_sequence;
 } AtlasRtosContext;
 
 static AtlasRtosContext atlas_rtos;
+/* Estimation sample streams: produced by the I/O task, consumed by the application
+ * task. Kept outside atlas_rtos so images that only link the fault hooks (Bringup)
+ * drop this storage. */
+static AtlasSampleRing atlas_rtos_imu_ring;
+static AtlasImuSample atlas_rtos_imu_storage[ATLAS_RTOS_IMU_RING_CAPACITY];
+static AtlasSampleRing atlas_rtos_mag_ring;
+static AtlasMagSample atlas_rtos_mag_storage[ATLAS_RTOS_MAG_RING_CAPACITY];
 static volatile bool atlas_outputs_permitted;
 static volatile bool atlas_output_fault;
 static volatile bool atlas_maintenance_hold;
@@ -418,37 +433,107 @@ static void atlas_rtos_sample_lsm6dsv16b(void)
 }
 
 /**
- * @brief Trigger one bounded MMC5983MA magnetic conversion.
+ * @brief Drain the LSM6DSV16B FIFO by one DMA step and publish every sample.
  */
-static void atlas_rtos_sample_mmc5983ma(void)
+static void atlas_rtos_stream_lsm6dsv16b(void)
 {
-    AtlasStatus status = AtlasMmc5983ma_ReadField(&atlas_rtos.board->mmc5983ma,
-                                                  &atlas_rtos.working_snapshot.mmc5983ma,
-                                                  10U);
+    size_t produced = 0U;
+    const AtlasStatus status = AtlasImuStream_Service(
+        atlas_rtos.imu_consumer_attached ? &atlas_rtos_imu_ring : NULL, &produced);
 
-    atlas_rtos.working_snapshot.mmc5983ma_status = status;
-    if (status == ATLAS_OK)
+    if ((status == ATLAS_OK) && (produced != 0U))
     {
-        atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_MMC5983MA;
+        /* The legacy snapshot keeps the newest sample for freshness and telemetry. */
+        atlas_rtos.working_snapshot.lsm6dsv16b = atlas_rtos.board->lsm6dsv16b.latest;
+        atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_LSM6DSV16B;
     }
+    atlas_rtos.working_snapshot.lsm6dsv16b_status = status;
     atlas_rtos_record_sampling_failure(status);
 }
 
 /**
- * @brief Trigger one compensated MS5611 pressure/temperature pair at OSR 1024.
+ * @brief Advance the MMC5983MA: collect a finished conversion, start the next on schedule.
+ * @param start true when the sampling period has elapsed.
+ * @return true when a bus transaction started a new conversion.
  */
-static void atlas_rtos_sample_ms5611(void)
+static bool atlas_rtos_sample_mmc5983ma(bool start)
 {
-    AtlasStatus status = AtlasMs5611_Read(&atlas_rtos.board->ms5611,
-                                          ATLAS_MS5611_OSR_1024,
-                                          &atlas_rtos.working_snapshot.ms5611);
+    AtlasMmc5983ma *const sensor = &atlas_rtos.board->mmc5983ma;
+    AtlasStatus status = ATLAS_OK;
+    bool complete = false;
+    bool started = false;
 
-    atlas_rtos.working_snapshot.ms5611_status = status;
-    if (status == ATLAS_OK)
+    if (sensor->measurement_pending)
     {
-        atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_MS5611;
+        AtlasMmc5983maField field;
+        status = AtlasMmc5983ma_PollMeasurement(sensor, &field, ATLAS_RTOS_MMC_TIMEOUT_MS,
+                                                &complete);
+        if ((status == ATLAS_OK) && complete)
+        {
+            atlas_rtos.working_snapshot.mmc5983ma = field;
+            atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_MMC5983MA;
+            if (atlas_rtos.mag_consumer_attached)
+            {
+                AtlasMagSample sample;
+                sample.timestamp_us = field.timestamp_us;
+                sample.sequence = atlas_rtos.mag_sequence;
+                sample.field_gauss[0] = field.x_gauss;
+                sample.field_gauss[1] = field.y_gauss;
+                sample.field_gauss[2] = field.z_gauss;
+                sample.flags = ATLAS_MAG_FLAG_VALID;
+                (void)AtlasSampleRing_Push(&atlas_rtos_mag_ring, &sample);
+            }
+            ++atlas_rtos.mag_sequence;
+        }
     }
+    else if (start)
+    {
+        status = AtlasMmc5983ma_StartMeasurement(sensor);
+        started = (status == ATLAS_OK);
+    }
+    else
+    {
+        return false;
+    }
+    atlas_rtos.working_snapshot.mmc5983ma_status = status;
     atlas_rtos_record_sampling_failure(status);
+    return started;
+}
+
+/**
+ * @brief Advance the MS5611 D2/D1 sequence at OSR 1024 without waiting.
+ * @param start true when the sampling period has elapsed.
+ * @return true when a bus transaction started a new sample.
+ */
+static bool atlas_rtos_sample_ms5611(bool start)
+{
+    AtlasMs5611 *const sensor = &atlas_rtos.board->ms5611;
+    AtlasStatus status = ATLAS_OK;
+    bool complete = false;
+    bool started = false;
+
+    if (sensor->phase != ATLAS_MS5611_PHASE_IDLE)
+    {
+        AtlasMs5611Sample sample;
+        status = AtlasMs5611_PollSample(sensor, &sample, &complete);
+        if ((status == ATLAS_OK) && complete)
+        {
+            atlas_rtos.working_snapshot.ms5611 = sample;
+            atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_MS5611;
+        }
+    }
+    else if (start)
+    {
+        status = AtlasMs5611_StartSample(sensor, ATLAS_MS5611_OSR_1024);
+        started = (status == ATLAS_OK);
+    }
+    else
+    {
+        return false;
+    }
+    atlas_rtos.working_snapshot.ms5611_status = status;
+    atlas_rtos_record_sampling_failure(status);
+    return started;
 }
 
 /**
@@ -796,6 +881,51 @@ static bool atlas_rtos_service_command(bool *maintenance)
 }
 
 /**
+ * @brief Copy estimation-stream counters into health; caller holds the health mutex.
+ */
+static void atlas_rtos_update_stream_health(void)
+{
+    const AtlasLsm6dsv16bHealth *const lsm = &atlas_rtos.board->lsm6dsv16b.health;
+    AtlasImuStreamStats stream;
+
+    AtlasImuStream_GetStats(&stream);
+    atlas_rtos.health.imu_stream_active = atlas_rtos.imu_stream_ready;
+    atlas_rtos.health.imu_dma_active = stream.dma_active;
+    atlas_rtos.health.imu_samples = lsm->fifo_samples;
+    atlas_rtos.health.imu_samples_missed = lsm->samples_missed;
+    atlas_rtos.health.imu_fifo_overruns = lsm->fifo_overruns;
+    atlas_rtos.health.imu_estimated_timestamps = lsm->estimated_timestamps;
+    atlas_rtos.health.imu_max_fifo_words = stream.max_fifo_words;
+    atlas_rtos.health.imu_dma_failures = stream.dma_errors + stream.dma_timeouts;
+    atlas_rtos.health.imu_ring_overflows = atlas_rtos_imu_ring.overflows;
+    atlas_rtos.health.mag_ring_overflows = atlas_rtos_mag_ring.overflows;
+    atlas_rtos.health.imu_clock_period_us =
+        atlas_rtos.board->lsm6dsv16b.clock.us_per_tick;
+}
+
+/**
+ * @brief Drift-free periodic schedule: advance by whole periods, resynchronize if late.
+ * @param now_ms Current cycle start.
+ * @param last_ms In/out scheduled time of the previous release.
+ * @param period_ms Nonzero period.
+ * @return true when a release is due this cycle.
+ */
+static bool atlas_rtos_period_elapsed(uint32_t now_ms, uint32_t *last_ms, uint32_t period_ms)
+{
+    if (!AtlasRtosPolicy_PeriodDue(now_ms, *last_ms, period_ms))
+    {
+        return false;
+    }
+    *last_ms += period_ms;
+    /* After a long stall, restart the grid instead of bursting to catch up. */
+    if (AtlasRtosPolicy_PeriodDue(now_ms, *last_ms, period_ms))
+    {
+        *last_ms = now_ms;
+    }
+    return true;
+}
+
+/**
  * @brief Own all post-start driver calls and construct coherent sensor publications.
  * @param argument Unused task argument.
  */
@@ -839,29 +969,27 @@ static void atlas_rtos_io_task(void *argument)
             last_adxl_ms = cycle_start_ms;
             atlas_rtos_sample_adxl375();
         }
-        if (lsm_interrupt ||
-            AtlasRtosPolicy_PeriodDue(cycle_start_ms, last_lsm_ms,
-                                      ATLAS_RTOS_LSM_PERIOD_MS))
+        if (atlas_rtos.imu_stream_ready)
+        {
+            /* The FIFO holds every sample; drain it every cycle for low latency. */
+            atlas_rtos_stream_lsm6dsv16b();
+        }
+        else if (lsm_interrupt ||
+                 AtlasRtosPolicy_PeriodDue(cycle_start_ms, last_lsm_ms,
+                                           ATLAS_RTOS_LSM_PERIOD_MS))
         {
             last_lsm_ms = cycle_start_ms;
             atlas_rtos_sample_lsm6dsv16b();
         }
-        if (AtlasRtosPolicy_PeriodDue(cycle_start_ms, last_mmc_ms,
-                                      ATLAS_RTOS_MMC_PERIOD_MS))
-        {
-            last_mmc_ms = cycle_start_ms;
-            atlas_rtos_sample_mmc5983ma();
-            slow_sample = true;
-        }
-        else if (AtlasRtosPolicy_PeriodDue(cycle_start_ms, last_ms5611_ms,
-                                      ATLAS_RTOS_MS5611_PERIOD_MS))
-        {
-            last_ms5611_ms = cycle_start_ms;
-            atlas_rtos_sample_ms5611();
-            slow_sample = true;
-        }
+        /* Split-phase conversions: each call is one short bus transaction at most,
+         * so neither sensor can stall the IMU drain while it converts. */
+        slow_sample = atlas_rtos_sample_mmc5983ma(
+            atlas_rtos_period_elapsed(cycle_start_ms, &last_mmc_ms, ATLAS_RTOS_MMC_PERIOD_MS));
+        slow_sample = atlas_rtos_sample_ms5611(
+            atlas_rtos_period_elapsed(cycle_start_ms, &last_ms5611_ms,
+                                      ATLAS_RTOS_MS5611_PERIOD_MS)) || slow_sample;
 
-        /* Avoid stacking two conversions and a bounded UART wait into one cycle. */
+        /* Keep command UART waits out of cycles that also start a conversion. */
         if (!slow_sample) command_cycle = atlas_rtos_service_command(&maintenance_cycle);
         (void)AtlasExpansion_Service(!slow_sample && !command_cycle &&
             !atlas_output_fault && !atlas_maintenance_hold);
@@ -872,6 +1000,7 @@ static void atlas_rtos_io_task(void *argument)
         if (xSemaphoreTake(atlas_rtos.health_mutex, portMAX_DELAY) == pdTRUE)
         {
             ++atlas_rtos.health.io_heartbeat;
+            atlas_rtos_update_stream_health();
             if (!maintenance_cycle && (uint32_t)(HAL_GetTick() - cycle_start_ms) >=
                 ATLAS_RTOS_IO_CYCLE_DEADLINE_MS)
             {
@@ -1171,6 +1300,17 @@ AtlasStatus AtlasRtos_Start(AtlasBoard *board,
     atlas_rtos.working_snapshot.mmc5983ma_status = ATLAS_ERROR_NOT_READY;
     atlas_rtos.working_snapshot.ms5611_status = ATLAS_ERROR_NOT_READY;
 
+    (void)AtlasSampleRing_Init(&atlas_rtos_imu_ring, atlas_rtos_imu_storage,
+                               sizeof(atlas_rtos_imu_storage[0]),
+                               ATLAS_RTOS_IMU_RING_CAPACITY);
+    (void)AtlasSampleRing_Init(&atlas_rtos_mag_ring, atlas_rtos_mag_storage,
+                               sizeof(atlas_rtos_mag_storage[0]),
+                               ATLAS_RTOS_MAG_RING_CAPACITY);
+    /* A probe failure or direct-register configuration keeps the legacy poll. */
+    atlas_rtos.imu_stream_ready = (board->init.lsm6dsv16b == ATLAS_OK) &&
+                                  board->lsm6dsv16b.config.fifo_enabled &&
+                                  (AtlasImuStream_Init(&board->lsm6dsv16b) == ATLAS_OK);
+
     atlas_rtos.command_queue = xQueueCreateStatic(
         ATLAS_RTOS_COMMAND_QUEUE_CAPACITY,
         sizeof(AtlasRtosQueuedCommand),
@@ -1458,6 +1598,38 @@ const char *AtlasRtos_FaultName(AtlasRtosFault fault)
         case ATLAS_RTOS_FAULT_OUTPUT_SERVICE:      return "OUTPUT_SERVICE";
         default:                                   return "UNKNOWN";
     }
+}
+
+/**
+ * @brief Consume timestamped IMU samples (application task only).
+ * @param destination Buffer for capacity samples.
+ * @param capacity Maximum samples to copy.
+ * @return Samples copied in arrival order.
+ */
+size_t AtlasRtos_ReadImuSamples(AtlasImuSample *destination, size_t capacity)
+{
+    if ((destination == NULL) || !atlas_rtos.resources_ready)
+    {
+        return 0U;
+    }
+    atlas_rtos.imu_consumer_attached = true;
+    return AtlasSampleRing_Pop(&atlas_rtos_imu_ring, destination, capacity);
+}
+
+/**
+ * @brief Consume timestamped magnetometer samples (application task only).
+ * @param destination Buffer for capacity samples.
+ * @param capacity Maximum samples to copy.
+ * @return Samples copied in arrival order.
+ */
+size_t AtlasRtos_ReadMagSamples(AtlasMagSample *destination, size_t capacity)
+{
+    if ((destination == NULL) || !atlas_rtos.resources_ready)
+    {
+        return 0U;
+    }
+    atlas_rtos.mag_consumer_attached = true;
+    return AtlasSampleRing_Pop(&atlas_rtos_mag_ring, destination, capacity);
 }
 
 /**

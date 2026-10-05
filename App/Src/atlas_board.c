@@ -13,6 +13,7 @@
 
 #include "atlas_board.h"
 #include "atlas_build.h"
+#include "atlas_time.h"
 #include "atlas_usb.h"
 #include "bsp_driver_sd.h"
 
@@ -115,6 +116,10 @@ AtlasStatus AtlasBoard_Init(AtlasBoard *board, const AtlasBoardHardware *hardwar
         board->init.gnss = board->init.gnss_ram_configuration =
         board->init.radio_transport = board->init.ble = ATLAS_ERROR_NOT_READY;
 
+    /* Every sensor timestamp shares TIM2; start it before any module is probed. */
+    overall = atlas_board_accumulate(overall,
+        AtlasTime_UseMicrosecondCounter(hardware->microsecond_pps_timer));
+
     board->init.led = AtlasLed_Init(&board->led);
     overall = atlas_board_accumulate(overall, board->init.led);
 
@@ -181,7 +186,9 @@ AtlasStatus AtlasBoard_ProbeModule(AtlasBoard *board, AtlasBoardModule module)
             return board->init.adxl375;
         case ATLAS_BOARD_LSM:
         {
-            const AtlasLsm6dsv16bConfig config = AtlasLsm6dsv16b_DefaultConfig();
+            /* Flight images stream the timestamped FIFO; Bringup keeps direct reads. */
+            const AtlasLsm6dsv16bConfig config = ATLAS_BRINGUP ?
+                AtlasLsm6dsv16b_DefaultConfig() : AtlasLsm6dsv16b_FlightConfig();
             board->init.lsm6dsv16b = AtlasLsm6dsv16b_Init(&board->lsm6dsv16b, hardware->imu_spi,
                 CS_LSM6DSV16B_GPIO_Port, CS_LSM6DSV16B_Pin, &config);
             return board->init.lsm6dsv16b;

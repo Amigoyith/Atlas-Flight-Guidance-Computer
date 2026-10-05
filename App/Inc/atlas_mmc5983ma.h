@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "atlas_spi_device.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,6 +51,8 @@ typedef struct
     float y_gauss;
     float z_gauss;
     uint32_t timestamp_ms;
+    /** Nominal conversion midpoint on the shared microsecond timebase (0 if absent). */
+    uint32_t timestamp_us;
 } AtlasMmc5983maField;
 
 /** @brief Driver health counters. */
@@ -69,6 +72,10 @@ typedef struct
     AtlasMmc5983maBandwidth bandwidth;
     bool initialized;
     AtlasMmc5983maHealth health;
+    /* Split-phase measurement state (StartMeasurement/PollMeasurement). */
+    bool measurement_pending;
+    uint32_t measurement_started_ms;
+    uint32_t measurement_started_us;
 } AtlasMmc5983ma;
 
 /**
@@ -105,6 +112,27 @@ AtlasStatus AtlasMmc5983ma_UnpackRaw(const uint8_t bytes[7],
 AtlasStatus AtlasMmc5983ma_ReadField(AtlasMmc5983ma *sensor,
                                      AtlasMmc5983maField *field,
                                      uint32_t timeout_ms);
+
+/**
+ * @brief Trigger one automatic-SET/RESET magnetic conversion and return immediately.
+ * @param sensor Initialized driver instance with no conversion pending.
+ * @return ATLAS_OK, ATLAS_ERROR_STATE when one is pending, or a transport failure.
+ */
+AtlasStatus AtlasMmc5983ma_StartMeasurement(AtlasMmc5983ma *sensor);
+
+/**
+ * @brief Check a started conversion once, without waiting.
+ * @param sensor Driver instance with a pending conversion.
+ * @param field Destination, written only when complete is true.
+ * @param timeout_ms Nonzero limit measured from the trigger.
+ * @param complete Destination completion flag.
+ * @return ATLAS_OK (complete or still converting), ATLAS_ERROR_TIMEOUT (pending
+ *         state cleared), ATLAS_ERROR_STATE without a pending conversion, or an error.
+ */
+AtlasStatus AtlasMmc5983ma_PollMeasurement(AtlasMmc5983ma *sensor,
+                                           AtlasMmc5983maField *field,
+                                           uint32_t timeout_ms,
+                                           bool *complete);
 
 /**
  * @brief Perform explicit SET and RESET conversions and cancel bridge offset.

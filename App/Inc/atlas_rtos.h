@@ -20,11 +20,16 @@
 
 #include "atlas_board.h"
 #include "atlas_rtos_policy.h"
+#include "atlas_sensor_samples.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/** IMU records buffered for the application task: ~267 ms at 480 Hz. */
+#define ATLAS_RTOS_IMU_RING_CAPACITY            (128U)
+/** Magnetometer records buffered for the application task: 160 ms at 100 Hz. */
+#define ATLAS_RTOS_MAG_RING_CAPACITY             (16U)
 #define ATLAS_RTOS_COMMAND_PAYLOAD_CAPACITY       (64U)
 #define ATLAS_RTOS_COMMAND_QUEUE_CAPACITY          (8U)
 #define ATLAS_RTOS_RX_STREAM_CAPACITY           (1024U)
@@ -191,6 +196,18 @@ typedef struct
     uint32_t assert_line;
     const char *assert_file;
     bool io_busy;
+    /* Estimation data path (see AtlasRtos_ReadImuSamples()). */
+    bool imu_stream_active;          /**< LSM6DSV16B FIFO streaming (else legacy poll). */
+    bool imu_dma_active;             /**< SPI3 DMA in use (else polled bursts). */
+    uint32_t imu_samples;            /**< Timestamped samples decoded. */
+    uint32_t imu_samples_missed;     /**< Sensor samples lost, from timestamp gaps. */
+    uint32_t imu_fifo_overruns;      /**< FIFO overflow events at the sensor. */
+    uint32_t imu_estimated_timestamps;
+    uint32_t imu_max_fifo_words;     /**< Worst FIFO backlog seen. */
+    uint32_t imu_dma_failures;       /**< DMA errors plus timeouts. */
+    uint32_t imu_ring_overflows;     /**< Samples refused: consumer too slow. */
+    uint32_t mag_ring_overflows;
+    float imu_clock_period_us;       /**< Measured LSM6 timestamp LSB. */
 } AtlasRtosHealth;
 
 /**
@@ -261,6 +278,27 @@ size_t AtlasRtos_ReadRadio(uint8_t *destination,
 size_t AtlasRtos_ReadBle(uint8_t *destination,
                          size_t capacity,
                          uint32_t timeout_ms);
+
+/**
+ * @brief Consume every timestamped LSM6DSV16B sample in arrival order.
+ * @param destination Buffer for capacity samples.
+ * @param capacity Maximum samples to copy.
+ * @return Samples copied.
+ * @note Single consumer: call only from AtlasRtos_ApplicationStep(). Publication
+ *       begins at the first call, so the first call normally returns 0. Drain at
+ *       least ATLAS_RTOS_IMU_RING_CAPACITY per ~250 ms; a sequence jump or the
+ *       ATLAS_IMU_FLAG_GAP_BEFORE flag marks lost data. Vectors are sensor-frame.
+ */
+size_t AtlasRtos_ReadImuSamples(AtlasImuSample *destination, size_t capacity);
+
+/**
+ * @brief Consume every timestamped MMC5983MA field sample in arrival order.
+ * @param destination Buffer for capacity samples.
+ * @param capacity Maximum samples to copy.
+ * @return Samples copied.
+ * @note Same single-consumer and start-on-first-call contract as the IMU stream.
+ */
+size_t AtlasRtos_ReadMagSamples(AtlasMagSample *destination, size_t capacity);
 
 /**
  * @brief Report whether the Atlas scheduler is currently running.

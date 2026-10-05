@@ -4,6 +4,7 @@
  *
  * Major functions:
  * - AtlasMmc5983ma_Init(): validates product ID 0x30 and readbacks bandwidth.
+ * - AtlasMmc5983ma_StartMeasurement()/PollMeasurement(): split-phase, non-blocking use.
  * - AtlasMmc5983ma_ReadField(): collects an automatic SET/RESET sample.
  * - AtlasMmc5983ma_ReadFieldSetReset(): removes bridge offset by differencing.
  */
@@ -282,16 +283,142 @@ AtlasStatus AtlasMmc5983ma_UnpackRaw(const uint8_t bytes[7],
 }
 
 /**
+ * @brief Return the nominal conversion time of a bandwidth setting.
+ * @param bandwidth Configured bandwidth code.
+ * @return Conversion time in microseconds.
+ */
+static uint32_t atlas_mmc5983_conversion_us(AtlasMmc5983maBandwidth bandwidth)
+{
+    switch (bandwidth)
+    {
+        case ATLAS_MMC5983_BW_100_HZ_8_MS:   return 8000U;
+        case ATLAS_MMC5983_BW_200_HZ_4_MS:   return 4000U;
+        case ATLAS_MMC5983_BW_400_HZ_2_MS:   return 2000U;
+        case ATLAS_MMC5983_BW_800_HZ_0_5_MS: return 500U;
+        default:                             return 8000U;
+    }
+}
+
+/**
+ * @brief Trigger one automatic-SET/RESET conversion without waiting.
+ * @param sensor Initialized driver instance.
+ * @return ATLAS_OK, ATLAS_ERROR_STATE while one is pending, or a transport failure.
+ */
+AtlasStatus AtlasMmc5983ma_StartMeasurement(AtlasMmc5983ma *sensor)
+{
+    AtlasStatus status;
+
+    if (sensor == NULL)
+    {
+        return ATLAS_ERROR_NULL;
+    }
+    if (!sensor->initialized)
+    {
+        return ATLAS_ERROR_NOT_READY;
+    }
+    if (sensor->measurement_pending)
+    {
+        return ATLAS_ERROR_STATE;
+    }
+    status = atlas_mmc5983_write(sensor, MMC5983_REG_CONTROL0,
+                                 MMC5983_CONTROL0_AUTO_SR | MMC5983_CONTROL0_TM_M);
+    if (status == ATLAS_OK)
+    {
+        sensor->measurement_started_ms = HAL_GetTick();
+        sensor->measurement_started_us = AtlasTime_NowUs();
+        sensor->measurement_pending = true;
+    }
+    return status;
+}
+
+/**
+ * @brief Check a started conversion once and collect it when done.
+ * @param sensor Driver instance with a pending conversion.
+ * @param field Destination written on completion.
+ * @param timeout_ms Nonzero limit from the trigger.
+ * @param complete Destination completion flag.
+ * @return ATLAS_OK, ATLAS_ERROR_TIMEOUT, ATLAS_ERROR_STATE, or a transport failure.
+ */
+AtlasStatus AtlasMmc5983ma_PollMeasurement(AtlasMmc5983ma *sensor,
+                                           AtlasMmc5983maField *field,
+                                           uint32_t timeout_ms,
+                                           bool *complete)
+{
+    const uint32_t conversion_us =
+        (sensor != NULL) ? atlas_mmc5983_conversion_us(sensor->bandwidth) : 0U;
+    uint8_t status_reg = 0U;
+    AtlasStatus status;
+
+    if ((sensor == NULL) || (field == NULL) || (complete == NULL))
+    {
+        return ATLAS_ERROR_NULL;
+    }
+    *complete = false;
+    if (timeout_ms == 0U)
+    {
+        return ATLAS_ERROR_ARGUMENT;
+    }
+    if (!sensor->measurement_pending)
+    {
+        return ATLAS_ERROR_STATE;
+    }
+    /* With a microsecond clock, do not trust MEAS_DONE before the nominal conversion
+     * time: this guards against a completion flag left over from the prior result. */
+    if (AtlasTime_MicrosecondsAvailable() &&
+        ((uint32_t)(AtlasTime_NowUs() - sensor->measurement_started_us) < conversion_us))
+    {
+        return ATLAS_OK;
+    }
+    status = atlas_mmc5983_read(sensor, MMC5983_REG_STATUS, &status_reg, 1U);
+    if (status != ATLAS_OK)
+    {
+        sensor->measurement_pending = false;
+        return status;
+    }
+    if ((status_reg & MMC5983_STATUS_MEAS_DONE) == 0U)
+    {
+        if ((uint32_t)(HAL_GetTick() - sensor->measurement_started_ms) >= timeout_ms)
+        {
+            sensor->measurement_pending = false;
+            ++sensor->health.measurement_timeouts;
+            return ATLAS_ERROR_TIMEOUT;
+        }
+        return ATLAS_OK;
+    }
+
+    sensor->measurement_pending = false;
+    status = atlas_mmc5983_read_raw(sensor, &field->raw);
+    if (status != ATLAS_OK)
+    {
+        return status;
+    }
+    field->x_gauss = ((float)((int32_t)field->raw.x - ATLAS_MMC5983MA_ZERO_FIELD_COUNTS)) /
+                     ATLAS_MMC5983MA_COUNTS_PER_GAUSS;
+    field->y_gauss = ((float)((int32_t)field->raw.y - ATLAS_MMC5983MA_ZERO_FIELD_COUNTS)) /
+                     ATLAS_MMC5983MA_COUNTS_PER_GAUSS;
+    field->z_gauss = ((float)((int32_t)field->raw.z - ATLAS_MMC5983MA_ZERO_FIELD_COUNTS)) /
+                     ATLAS_MMC5983MA_COUNTS_PER_GAUSS;
+    field->timestamp_ms = HAL_GetTick();
+    field->timestamp_us = AtlasTime_MicrosecondsAvailable() ?
+                          (sensor->measurement_started_us + (conversion_us / 2U)) : 0U;
+    ++sensor->health.measurements;
+    *complete = true;
+    return ATLAS_OK;
+}
+
+/**
  * @brief Trigger one magnetic conversion with automatic bridge SET/RESET.
  * @param sensor Initialized driver instance.
  * @param field Destination field sample.
  * @param timeout_ms Nonzero bounded completion timeout.
  * @return ATLAS_OK or a typed timeout/transport failure.
+ * @note Blocking convenience wrapper over StartMeasurement()/PollMeasurement().
  */
 AtlasStatus AtlasMmc5983ma_ReadField(AtlasMmc5983ma *sensor,
                                      AtlasMmc5983maField *field,
                                      uint32_t timeout_ms)
 {
+    bool complete = false;
     AtlasStatus status;
 
     if ((sensor == NULL) || (field == NULL))
@@ -307,24 +434,19 @@ AtlasStatus AtlasMmc5983ma_ReadField(AtlasMmc5983ma *sensor,
         return ATLAS_ERROR_ARGUMENT;
     }
 
-    status = atlas_mmc5983_measure_raw(sensor,
-                                       MMC5983_CONTROL0_AUTO_SR | MMC5983_CONTROL0_TM_M,
-                                       &field->raw,
-                                       timeout_ms);
-    if (status != ATLAS_OK)
+    /* A caller switching from split-phase use discards the unfinished conversion. */
+    sensor->measurement_pending = false;
+    status = AtlasMmc5983ma_StartMeasurement(sensor);
+    while (status == ATLAS_OK)
     {
-        return status;
+        status = AtlasMmc5983ma_PollMeasurement(sensor, field, timeout_ms, &complete);
+        if ((status != ATLAS_OK) || complete)
+        {
+            break;
+        }
+        AtlasTime_DelayMs(1U);
     }
-
-    field->x_gauss = ((float)((int32_t)field->raw.x - ATLAS_MMC5983MA_ZERO_FIELD_COUNTS)) /
-                     ATLAS_MMC5983MA_COUNTS_PER_GAUSS;
-    field->y_gauss = ((float)((int32_t)field->raw.y - ATLAS_MMC5983MA_ZERO_FIELD_COUNTS)) /
-                     ATLAS_MMC5983MA_COUNTS_PER_GAUSS;
-    field->z_gauss = ((float)((int32_t)field->raw.z - ATLAS_MMC5983MA_ZERO_FIELD_COUNTS)) /
-                     ATLAS_MMC5983MA_COUNTS_PER_GAUSS;
-    field->timestamp_ms = HAL_GetTick();
-    ++sensor->health.measurements;
-    return ATLAS_OK;
+    return status;
 }
 
 /**
@@ -386,6 +508,7 @@ AtlasStatus AtlasMmc5983ma_ReadFieldSetReset(AtlasMmc5983ma *sensor,
     field->z_gauss = ((float)((int32_t)field->raw.z - (int32_t)reset_raw.z)) /
                      (2.0F * ATLAS_MMC5983MA_COUNTS_PER_GAUSS);
     field->timestamp_ms = HAL_GetTick();
+    field->timestamp_us = AtlasTime_NowUs();
     ++sensor->health.measurements;
     return ATLAS_OK;
 }

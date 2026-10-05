@@ -5,6 +5,7 @@
  * Major functions:
  * - AtlasTime_DelayMs(): selects HAL busy-wait timing before scheduling and task delay after.
  * - AtlasTime_StartCounter(): validates/start-once semantics for the shared counter.
+ * - AtlasTime_UseMicrosecondCounter()/NowUs(): register and read the sample timebase.
  */
 
 #include "atlas_time.h"
@@ -17,6 +18,9 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #endif
+
+/** Registered 1 MHz counter; written once during single-threaded startup. */
+static TIM_HandleTypeDef *volatile atlas_time_microsecond_timer;
 
 /**
  * @brief Delay without busy-spinning a running RTOS task.
@@ -91,4 +95,37 @@ AtlasStatus AtlasTime_StartCounter(TIM_HandleTypeDef *timer)
     return ((timer->State == HAL_TIM_STATE_BUSY) &&
             ((timer->Instance->CR1 & TIM_CR1_CEN) != 0U)) ?
            ATLAS_OK : ATLAS_ERROR_IO;
+}
+
+/**
+ * @brief Start and register the shared microsecond sample timebase.
+ * @param timer Free-running 1 MHz, 32-bit counter handle.
+ * @return ATLAS_OK or the counter start failure.
+ */
+AtlasStatus AtlasTime_UseMicrosecondCounter(TIM_HandleTypeDef *timer)
+{
+    const AtlasStatus status = AtlasTime_StartCounter(timer);
+
+    atlas_time_microsecond_timer = (status == ATLAS_OK) ? timer : NULL;
+    return status;
+}
+
+/**
+ * @brief Report whether the sample timebase is registered.
+ * @return true when AtlasTime_NowUs() is meaningful.
+ */
+bool AtlasTime_MicrosecondsAvailable(void)
+{
+    return atlas_time_microsecond_timer != NULL;
+}
+
+/**
+ * @brief Read the shared microsecond counter.
+ * @return Current count, or 0 without a registered timebase.
+ */
+uint32_t AtlasTime_NowUs(void)
+{
+    TIM_HandleTypeDef *const timer = atlas_time_microsecond_timer;
+
+    return (timer == NULL) ? 0U : (uint32_t)__HAL_TIM_GET_COUNTER(timer);
 }

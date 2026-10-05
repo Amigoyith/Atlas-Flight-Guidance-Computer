@@ -58,7 +58,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_bringup.c
     App/Src/atlas_bringup_protocol.c
     App/Src/atlas_buzzer.c
+    App/Src/atlas_clock_map.c
     App/Src/atlas_gnss.c
+    App/Src/atlas_imu_stream.c
     App/Src/atlas_expansion.c
     App/Src/atlas_io.c
     App/Src/atlas_led.c
@@ -69,6 +71,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_rfd900x.c
     App/Src/atlas_rtos.c
     App/Src/atlas_rtos_policy.c
+    App/Src/atlas_sample_ring.c
     App/Src/atlas_spi_device.c
     App/Src/atlas_status.c
     App/Src/atlas_storage.c

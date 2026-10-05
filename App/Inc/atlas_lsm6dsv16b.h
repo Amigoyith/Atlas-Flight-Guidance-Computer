@@ -6,14 +6,25 @@
  * - AtlasLsm6dsv16b_Init(): resets, identifies, configures, and verifies the IMU.
  * - AtlasLsm6dsv16b_ReadSample(): returns coherent temperature, gyro, and accel data.
  * - AtlasLsm6dsv16b_OnInterrupt()/ConsumeInterrupt(): defer INT1 work out of ISR context.
+ * - AtlasLsm6dsv16b_ReadFifoStatus()/SyncClock()/ReadFifoWords(): FIFO transport pieces.
+ * - AtlasLsm6dsv16b_DecodeFifo(): turns raw tagged FIFO words into AtlasImuSample records.
+ *
+ * FIFO mode (flight): gyro and accel are batched at one rate together with a hardware
+ * timestamp word per sample, in stream mode. Each FIFO word is 7 bytes (tag + 6 data
+ * bytes); with CTRL3.IF_INC a multi-byte read starting at FIFO_DATA_OUT_TAG wraps back
+ * to 0x78 after 0x7E, so any number of words can be read in one SPI burst (polled or
+ * DMA). The decoder is pure: it only needs the bytes, so the transport is replaceable.
  */
 
 #ifndef ATLAS_LSM6DSV16B_H
 #define ATLAS_LSM6DSV16B_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
+#include "atlas_clock_map.h"
+#include "atlas_sensor_samples.h"
 #include "atlas_spi_device.h"
 
 #ifdef __cplusplus
@@ -21,6 +32,14 @@ extern "C" {
 #endif
 
 #define ATLAS_LSM6DSV16B_WHO_AM_I (0x71U)
+/** Bytes per FIFO word: TAG then X/Y/Z little-endian 16-bit data. */
+#define ATLAS_LSM6DSV16B_FIFO_WORD_BYTES   (7U)
+/** SPI read command for FIFO_DATA_OUT_TAG (0x78) with the read bit. */
+#define ATLAS_LSM6DSV16B_FIFO_READ_COMMAND (0xF8U)
+/** Maximum words DIFF_FIFO can report. */
+#define ATLAS_LSM6DSV16B_FIFO_MAX_WORDS    (511U)
+/** Nominal timestamp LSB; the actual period is measured against the MCU clock. */
+#define ATLAS_LSM6DSV16B_TIMESTAMP_US_PER_LSB (21.75F)
 
 /** @brief Supported high-performance accelerometer/gyroscope ODR codes. */
 typedef enum
@@ -61,6 +80,8 @@ typedef struct
     AtlasLsm6dsv16bAccelRange accel_range;
     AtlasLsm6dsv16bGyroRange gyro_range;
     bool route_data_ready_to_int1;
+    /** Stream-mode FIFO with per-sample timestamps; requires accel_odr == gyro_odr. */
+    bool fifo_enabled;
 } AtlasLsm6dsv16bConfig;
 
 /** @brief One coherent direct-register IMU sample. */
@@ -92,7 +113,28 @@ typedef struct
     uint32_t reset_timeouts;
     volatile uint32_t interrupt_count;
     uint32_t samples_read;
+    uint32_t fifo_overruns;         /**< FIFO_OVR observed: the oldest words were lost. */
+    uint32_t fifo_words;            /**< Tagged words decoded. */
+    uint32_t fifo_samples;          /**< AtlasImuSample records produced. */
+    uint32_t samples_missed;        /**< Sensor samples inferred lost from timestamp gaps. */
+    uint32_t incomplete_samples;    /**< Records missing gyro or accel. */
+    uint32_t estimated_timestamps;  /**< Records without a hardware timestamp word. */
+    uint32_t unknown_tags;          /**< Words with a tag this configuration never batches. */
+    uint32_t output_overflows;      /**< Records discarded for lack of caller capacity. */
 } AtlasLsm6dsv16bHealth;
+
+/** @brief Partially assembled FIFO time slot (one BDR event). */
+typedef struct
+{
+    uint32_t sensor_ticks;
+    int16_t gyro[3];
+    int16_t accel[3];
+    uint8_t tag_count;
+    bool active;
+    bool has_timestamp;
+    bool has_gyro;
+    bool has_accel;
+} AtlasLsm6dsv16bFifoSlot;
 
 /** @brief LSM6DSV16B driver instance. */
 typedef struct
@@ -103,6 +145,15 @@ typedef struct
     uint32_t interrupt_count_consumed;
     bool initialized;
     AtlasLsm6dsv16bHealth health;
+    /* FIFO decoding state; unused in direct-register mode. */
+    AtlasClockMap clock;
+    AtlasLsm6dsv16bFifoSlot slot;
+    uint32_t last_sample_ticks;
+    bool have_last_sample;
+    bool overrun_pending;
+    uint32_t next_sequence;
+    /** Latest decoded FIFO sample in the legacy snapshot format. */
+    AtlasLsm6dsv16bSample latest;
 } AtlasLsm6dsv16b;
 
 /**
@@ -110,6 +161,12 @@ typedef struct
  * @return Complete default configuration.
  */
 AtlasLsm6dsv16bConfig AtlasLsm6dsv16b_DefaultConfig(void);
+
+/**
+ * @brief Return the flight data path: 480 Hz FIFO with timestamps, +/-16 g, +/-4000 dps.
+ * @return Complete flight configuration; INT1 data-ready routing disabled.
+ */
+AtlasLsm6dsv16bConfig AtlasLsm6dsv16b_FlightConfig(void);
 
 /**
  * @brief Reset, identify, configure, and read back the LSM6DSV16B.
@@ -155,6 +212,52 @@ void AtlasLsm6dsv16b_OnInterrupt(AtlasLsm6dsv16b *sensor);
  * @return true when one or more new edges occurred since the prior call.
  */
 bool AtlasLsm6dsv16b_ConsumeInterrupt(AtlasLsm6dsv16b *sensor);
+
+/**
+ * @brief Read the FIFO fill level and overrun flag.
+ * @param sensor Initialized FIFO-mode instance.
+ * @param words Destination count of unread 7-byte words.
+ * @param overrun Destination; true when words were lost since the prior status read.
+ * @return ATLAS_OK, ATLAS_ERROR_STATE outside FIFO mode, or a transport error.
+ */
+AtlasStatus AtlasLsm6dsv16b_ReadFifoStatus(AtlasLsm6dsv16b *sensor,
+                                           uint16_t *words,
+                                           bool *overrun);
+
+/**
+ * @brief Read TIMESTAMP0..3 bracketed by the MCU clock and feed the clock map.
+ * @param sensor Initialized FIFO-mode instance.
+ * @return ATLAS_OK, ATLAS_ERROR_NOT_READY without a microsecond timebase, or an error.
+ * @note Call roughly once per drain; samples are timed relative to the latest pair.
+ */
+AtlasStatus AtlasLsm6dsv16b_SyncClock(AtlasLsm6dsv16b *sensor);
+
+/**
+ * @brief Read FIFO words with polled SPI bursts (fallback for the DMA path).
+ * @param sensor Initialized FIFO-mode instance.
+ * @param bytes Destination of words * 7 bytes.
+ * @param words Word count, at most ATLAS_LSM6DSV16B_FIFO_MAX_WORDS.
+ * @return ATLAS_OK or a transport error; bytes are undefined on error.
+ */
+AtlasStatus AtlasLsm6dsv16b_ReadFifoWords(AtlasLsm6dsv16b *sensor,
+                                          uint8_t *bytes,
+                                          size_t words);
+
+/**
+ * @brief Decode raw FIFO words into timestamped SI samples.
+ * @param sensor Initialized FIFO-mode instance; carries slot state across calls.
+ * @param bytes words * 7 bytes read from FIFO_DATA_OUT_TAG onward.
+ * @param words Number of words in bytes.
+ * @param samples Destination records.
+ * @param capacity Record capacity; capacity >= words never discards.
+ * @return Records written. A slot split across two reads completes on the later call.
+ * @note Pure computation apart from updating sensor state and counters.
+ */
+size_t AtlasLsm6dsv16b_DecodeFifo(AtlasLsm6dsv16b *sensor,
+                                  const uint8_t *bytes,
+                                  size_t words,
+                                  AtlasImuSample *samples,
+                                  size_t capacity);
 
 #ifdef __cplusplus
 }

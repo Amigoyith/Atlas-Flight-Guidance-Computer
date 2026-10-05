@@ -41,7 +41,17 @@ typedef struct
     int32_t pressure_pa;
     int32_t temperature_centi_c;
     uint32_t timestamp_ms;
+    /** Nominal pressure-conversion midpoint on the microsecond timebase (0 if absent). */
+    uint32_t timestamp_us;
 } AtlasMs5611Sample;
+
+/** @brief Split-phase conversion progress. */
+typedef enum
+{
+    ATLAS_MS5611_PHASE_IDLE = 0,
+    ATLAS_MS5611_PHASE_TEMPERATURE,  /**< D2 conversion in progress. */
+    ATLAS_MS5611_PHASE_PRESSURE      /**< D1 conversion in progress. */
+} AtlasMs5611Phase;
 
 /** @brief Driver health counters. */
 typedef struct
@@ -60,6 +70,12 @@ typedef struct
     uint16_t prom[8];
     bool initialized;
     AtlasMs5611Health health;
+    /* Split-phase state (StartSample/PollSample). */
+    AtlasMs5611Phase phase;
+    AtlasMs5611Osr phase_osr;
+    uint32_t phase_started_ms;
+    uint32_t phase_started_us;
+    uint32_t pending_d2;
 } AtlasMs5611;
 
 /**
@@ -103,6 +119,28 @@ AtlasStatus AtlasMs5611_Compensate(const uint16_t prom[8],
 AtlasStatus AtlasMs5611_Read(AtlasMs5611 *sensor,
                              AtlasMs5611Osr osr,
                              AtlasMs5611Sample *sample);
+
+/**
+ * @brief Begin a temperature-then-pressure sample without waiting.
+ * @param sensor Initialized, idle driver instance.
+ * @param osr Oversampling for both conversions.
+ * @return ATLAS_OK, ATLAS_ERROR_STATE while a sample is in progress, or an error.
+ */
+AtlasStatus AtlasMs5611_StartSample(AtlasMs5611 *sensor, AtlasMs5611Osr osr);
+
+/**
+ * @brief Advance a started sample by at most one bus step, never waiting.
+ * @param sensor Driver instance with a sample in progress.
+ * @param sample Destination, written only when complete is true.
+ * @param complete Destination completion flag.
+ * @return ATLAS_OK (complete or still converting), ATLAS_ERROR_STATE when idle, or a
+ *         transport/protocol error that returns the driver to idle.
+ * @note Call periodically (e.g. every 1 ms); a conversion is read only after its
+ *       worst-case time has elapsed, and a zero ADC result is rejected.
+ */
+AtlasStatus AtlasMs5611_PollSample(AtlasMs5611 *sensor,
+                                   AtlasMs5611Sample *sample,
+                                   bool *complete);
 
 #ifdef __cplusplus
 }
