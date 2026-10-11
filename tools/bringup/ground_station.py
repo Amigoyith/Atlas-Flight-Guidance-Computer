@@ -157,12 +157,17 @@ class Station:
                 try:
                     data = self.serial.read(min(self.serial.in_waiting, 32768))
                     previous_errors = self.decoder.errors
+                    previous_remote_errors=self.decoder.remote_errors
                     for frame in self.decoder.feed(data):
                         self.ingest(frame, now)
                     if self.decoder.errors != previous_errors:
                         self.session.blocked = "Invalid telemetry received. See the session log, then disconnect and reconnect."
                         self.event(self.decoder.last_error, "error")
                         self.batch.clear()
+                    if self.decoder.remote_errors!=previous_remote_errors:
+                        self.session.remote=None
+                        self.session.remote_received_at=float('-inf')
+                        self.event('Remote snapshot rejected: '+self.decoder.last_remote_error,'error')
                     if self.handshake_deadline:
                         if self.session.blocked or (self.session.hello and self.session.fresh(now)):
                             self.handshake_deadline = 0.0
@@ -192,6 +197,9 @@ class Station:
             return dict(mode=self.mode, port=self.port, generation=self.generation, servo_control_epoch=self.servo_control_epoch,
                         fresh=fresh, age_ms=round(age*1000) if math.isfinite(age) else None,
                         hello=self.session.hello, status=self.session.status,
+                        remote=self.session.remote,
+                        remote_age_ms=round((now-self.session.remote_received_at)*1000) if self.session.remote else None,
+                        remote_decoder_errors=self.decoder.remote_errors,
                         rows=observations(self.session.status) if self.session.status and not compact else [],
                         history=[] if compact else list(self.history), events=[] if compact else list(self.events),
                         blocked=self.session.blocked, pending=self.session.pending.verb if self.session.pending else None,
@@ -270,8 +278,8 @@ class Station:
                 verb = body.get("verb", "")
                 if not isinstance(verb, str) or len(verb) > 90 or verb.startswith("bootloader"):
                     raise ValueError("Use the verified firmware-update workflow.")
-                if verb.startswith('servo '):
-                    raise ValueError('Use the dedicated servo controls')
+                if verb.startswith(('servo ','stabilize ')):
+                    raise ValueError('Use the dedicated servo or stabilization controls')
                 if self.batch:
                     raise ValueError("Wait for the sensor sequence to finish.")
                 # Fixture/RF/media mutations carry an additional deliberate UI acknowledgement.
@@ -284,6 +292,26 @@ class Station:
                 self.servo_approved = None
                 self.servo_control_epoch += 1
                 self.send('servo stop')
+            elif action == 'stabilization':
+                operation=body.get('operation')
+                if operation not in ('on','off','calibrate','directions'):
+                    raise ValueError('Unknown stabilization operation')
+                if operation!='off':
+                    if (type(body.get('generation')) is not int or body['generation']!=self.generation or
+                            type(body.get('control_epoch')) is not int or body['control_epoch']!=self.servo_control_epoch):
+                        raise ValueError('Control session changed; reload fresh dashboard state')
+                    if self.batch or body.get('confirmed') is not True:
+                        raise ValueError('Wait for probing and confirm the bench setup')
+                verb='stabilize '+operation
+                if operation in ('calibrate','directions'):
+                    reverse=body.get('reverse_mask')
+                    if type(reverse) is not int or not 0<=reverse<=15:
+                        raise ValueError('Invalid servo direction mask')
+                    verb+=' '+str(reverse)
+                if operation=='off': self.batch.clear()
+                self.servo_approved=None
+                self.servo_control_epoch+=1
+                self.send(verb)
             elif action == 'servo':
                 if (type(body.get('generation')) is not int or body['generation'] != self.generation or
                         type(body.get('control_epoch')) is not int or body['control_epoch'] != self.servo_control_epoch):
@@ -306,6 +334,12 @@ class Station:
                     if self.servo_approved != (self.generation, channel) or type(pulse) is not int or not 900 <= pulse <= 2100:
                         raise ValueError('Explicitly enable this channel before moving it')
                     self.send(f'servo set {channel} {pulse}')
+                elif operation == 'sweep':
+                    period = body.get('period_ms')
+                    if (self.servo_approved != (self.generation, channel) or body.get('confirmed') is not True or
+                            type(period) is not int or period not in (1000, 2000)):
+                        raise ValueError('Confirm one bounded sweep on the explicitly enabled channel')
+                    self.send(f'servo sweep {channel} {period}')
                 else:
                     raise ValueError('Unknown servo operation')
             elif action == "sensors":
@@ -415,7 +449,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/":
             self.reply((WEB / "index.html").read_text(encoding="utf-8").replace("__ATLAS_TOKEN__", self.server.token).replace('__ATLAS_ROOT_ID__', ROOT_ID), content_type="text/html; charset=utf-8")
-        elif self.path in ("/app.js", "/servo_motion.js", "/servos.js", "/style.css"):
+        elif self.path in ("/app.js", "/radio.js", "/remote.js", "/servo_motion.js", "/servos.js", "/stabilization.js", "/style.css"):
             kind = "text/javascript" if self.path.endswith(".js") else "text/css"
             self.reply((WEB / self.path[1:]).read_bytes(), content_type=kind + "; charset=utf-8")
         elif self.path == "/api/state":

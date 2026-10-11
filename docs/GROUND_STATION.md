@@ -1,14 +1,45 @@
 # Atlas Ground Station and USB updates
 
+ServoBench **1.3.0** adds an autonomous [Stabilization tab](STABILIZATION.md): four radial servos, SD-saved settings and physical SW2 control. The single-channel USB/time limits below describe manual Servo workbench operation; stabilization has separate sensor, power and switch limits. See the [three-pass review](STABILIZATION_REVIEW.md).
+
+Version 1.2.6 adds **Happy Birthday** beside Imperial March in Test controls. It plays once for 12 seconds, with the same Stop control and live playback status. Both diagnostic firmware profiles support it; older firmware keeps the new button disabled. See the [three-pass melody review](BIRTHDAY_REVIEW.md).
+
 Version 1.2.5 applies each selected servo angle directly, using the servo’s own position controller. The dashboard offers angle buttons and numeric entry across nominal ±50°. It retains the corrected PCB PWM numbering (right 1 to left 8), 16-sample ADC averaging and 8.55 V output-loop cutoff. See the [servo review](SERVO_FIX_REVIEW.md). Version 1.2.2 added the owner-selected 8.55 V ServoBench cutoff and repairs the march transition. It retains the 1.2.1 work that corrects the ADC reference scaling, exposes SW2 and SD diagnostics, adds startup audio, and provides a separate ServoBench image for manual KST X10 tests. Atlas uses battery power; USB-C carries data. Follow the board inspection and power requirements in [startup](startup.md), including the 16.3 V input limit and mandatory RGB inhibit. Keep J5 open and pyro loads disconnected. Servos stay disconnected until the [servo bench procedure](SERVO_BENCH.md) is satisfied.
 
 ## Start the dashboard
 
-Double-click **Start Atlas Dashboard.cmd in your local clone**. It opens [Atlas Ground Station](http://127.0.0.1:8765). Keep the launcher running. **Atlas Dashboard Demo.cmd** opens explicitly simulated instruments and servo models with hardware actions disabled.
+Double-click **Start Atlas Dashboard.cmd** on Windows or [**Start Atlas Dashboard.command**](../Start%20Atlas%20Dashboard.command) on macOS, inside the complete repository folder. Both open [Atlas Ground Station](http://127.0.0.1:8765) in your default browser. Keep the launcher window running. **Atlas Dashboard Demo.cmd** opens explicitly simulated instruments and servo models with hardware actions disabled; the Mac launcher accepts `--demo` or you can choose **Explore demo** in the dashboard.
 
 On a fresh Windows laptop, install Python 3.10 or newer with its Python launcher first. The Atlas launcher creates this clone's `.venv` and installs the bundled, SHA-256-verified pyserial wheel without network access. Do not copy another computer's `.venv`, browser shortcut, or absolute path. No Node packages, accounts, map service, or compiler are required for the dashboard. A failed setup leaves the error visible and details in `.atlas-launch.log`; an unusable environment is preserved under a timestamped name.
 
-Launch paths are resolved from the batch file and Python source, regardless of the working directory. Repository documentation links are relative. `127.0.0.1` always refers to the computer running that copy of the dashboard; it does not connect to another laptop's server.
+### macOS setup
+
+1. Install a current Python 3 release (minimum 3.10) using the [official macOS installer](https://www.python.org/downloads/macos/). Its universal installer supports Intel and Apple silicon. Existing Homebrew Python installations also work; Homebrew is not required. Apple's `/usr/bin/python3` development-tools installation is deliberately skipped. See [Python's macOS guide](https://docs.python.org/3/using/mac.html).
+2. Extract or clone the complete repository into a writable folder, then double-click **Start Atlas Dashboard.command**. It finds Python even with Finder's limited search path, creates `.venv/bin/python`, verifies and installs bundled pyserial 3.5, and launches the same dashboard as Windows. Python itself is a one-time prerequisite; Atlas's dependency setup needs no internet connection or administrator access. Tk is not required by this browser dashboard.
+3. Keep Terminal open while using Atlas; press **Control-C** to stop the server. If the browser does not open, use the local address printed in Terminal. Select Atlas's `/dev/cu.usbmodem...` USB device in the dashboard; the exact suffix varies.
+
+If a ZIP/extraction tool loses the executable permission, open Terminal in the repository folder and run:
+
+```sh
+chmod +x "Start Atlas Dashboard.command"
+./"Start Atlas Dashboard.command"
+```
+
+From that folder, these optional commands check setup, start a demo, or choose another port:
+
+```sh
+/bin/bash "Start Atlas Dashboard.command" --check
+/bin/bash "Start Atlas Dashboard.command" --demo
+/bin/bash "Start Atlas Dashboard.command" --port 8766
+```
+
+`--check` prepares and verifies dependencies and prints the launch command; it does not open a server, browser, serial port or firmware operation. `--no-browser` starts the server and leaves browser opening to you. For a custom Python location, set `ATLAS_PYTHON` to its full executable path. Setup errors remain visible in Terminal; Python bootstrap errors also write `.atlas-launch.log` in the repository. An unusable environment is preserved and replaced; missing pip is repaired offline.
+
+This launcher is for **macOS computers**, not iPhone/iPad. Firmware builds and USB DFU programming need their own tool installation and remain outside the Mac launcher verification. Native Finder/browser behavior and a physical Mac-to-Atlas USB connection have not been tested locally. See the [Mac launcher review](MACOS_LAUNCHER_REVIEW.md) for performed checks and the Mac CI coverage.
+
+### Windows options and existing sessions
+
+Launch paths are resolved from the launcher and Python source, regardless of the working directory. Repository documentation links are relative. `127.0.0.1` always refers to the computer running that copy of the dashboard; it does not connect to another laptop's server.
 
 If the same clone already owns the port, the launcher opens its existing session. A different clone or older server on that port produces a clear message; close its launcher or run:
 
@@ -55,7 +86,9 @@ Startup plays four rising notes once after the buzzer owner starts, even without
 
 **Test controls → Indicators & logic → Imperial March** plays a single 42-note arrangement, 16.5 seconds. Version 1.2.2 restores the high-G repeat and short E–E♭–E turn in the bridge beginning at note 19, corrects the later B♭ landing, and places both opening phrases on four-second boundaries at 120 beats/minute. The closing phrase starts at 13.25 seconds with E♭–F♯–E♭–B♭ before returning to G; this is the owner's accepted Preview C. The owner's preferred lower octave is retained: 311–784 Hz, with a 300 Hz driver minimum. This remains an adaptation of the owner's supplied rough phrases. Timer reload and compares latch together before each tone starts. Firmware 1.1.1 reports its older 33-note/11.36-second sequence.
 
-**Stop indicators** cancels the melody. USB/DTR loss, a changed session, fault or a new sensor/link command cancels it; there is no replay queue. Polling continues while it plays and late service skips elapsed notes. Firmware update is refused during audio. Status shows MCU playback progress; actual pitch, loudness and differential waveform still require acoustic/scope acceptance.
+**Test controls → Indicators & logic → Happy Birthday** requires firmware 1.2.6 and plays the traditional 25-note tune once: C major, 120 beats/minute, 12 seconds, 392–784 Hz. The status names the active song and shows its note count. Both melody buttons are unavailable during playback or active servo PWM; another song is never queued.
+
+**Stop indicators** cancels either melody. USB/DTR loss, a changed session, fault or a new sensor/link command cancels it; there is no replay queue. Polling continues while it plays and late service skips elapsed notes. Firmware update is refused during audio. Status shows MCU playback progress; actual pitch, loudness and differential waveform still require acoustic/scope acceptance.
 
 ## Build and first installation
 

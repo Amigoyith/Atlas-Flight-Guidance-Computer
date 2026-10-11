@@ -13,8 +13,10 @@ const views = {
   sensors:['INSTRUMENTS / 02','Sensor observatory','Measurements, timestamps and diagnostics, side by side.','Sensors'],
   gnss:['NAVIGATION / 03','Position & timing','GNSS fixes, local ground track and pulse-per-second timing.','Navigation'],
   links:['COMMUNICATIONS / 04','Across the link','Observe USB, BLE and the RFD900x serial modem.','Communications'],
+  remote:['TELEMETRY / 05','The other Atlas','Sensor readings and board condition, received over the radio link.','Remote Atlas'],
   tests:['BENCH / 05','Test with intention','Run one explicit operation and inspect its result.','Test controls'],
   servos:['BENCH / 06','Motion, under control','Choose a precise angle for one KST X10 at a time, across its nominal ±50° travel.','Servo workbench'],
+  stabilization:['BENCH / 07','Keep pointing down','Four radial servos follow gravity. Atlas runs the loop, with or without USB.','Stabilization'],
   firmware:['MAINTENANCE / 06','Firmware, simplified','Verified updates through the same USB-C connection.','Firmware'],
   capture:['EVIDENCE / 07','The session record','Keep the measurements and the context together.','Session log']
 };
@@ -107,6 +109,7 @@ function render(v){
   const notice=$('notice');notice.className='notice'+(demoMode?' demo':v.blocked||networkFailed?' error':'');
   notice.textContent=networkFailed?'The local server is unavailable. Measurements and controls are no longer live.':v.updating?v.firmware.message:demoMode?'DEMO MODE · Every measurement is simulated. No hardware is connected and test controls cannot transmit.':v.blocked?v.blocked:good?'USB telemetry active · Battery-powered board · Bench measurements require physical qualification.':live?'USB open. Waiting for a fresh, recognized Atlas Bringup handshake and telemetry.':'Connect Atlas to see measurements, or explore the dashboard with clearly labelled demo data.';
   window.AtlasServos?.render(v);
+  window.AtlasStabilization?.render(v);
   $('output-profile').textContent=v.hello?.profile==='servo_bench'?'PYRO INHIBITED · SERVO BENCH':'PWM / PYRO INHIBITED';
   $('switch-overview').textContent=good&&s.power.available&&(!('t' in s.gpio)||age(s,s.gpio.t)<=500)?(s.gpio.switch?'HIGH · 1':'LOW · 0'):'—';
   $('sd-overview').textContent=good?(s.sd.card?(s.sd.mounted?'MOUNTED':'DETECTED'):'NO CARD'):'—';
@@ -118,8 +121,13 @@ function render(v){
   document.querySelectorAll('[data-command],#set-utc,#i2c-read').forEach(el=>el.disabled=!live||!good||!!v.pending||v.batch.length>0||v.updating);
   const playing=good&&s.buzzer?.playing===1;
   const march=$('march-button');
-  march.disabled=march.disabled||v.hello?.buzzer_melody!==true||!s?.buzzer||playing;
-  march.textContent=playing?(s.buzzer.track===1?'♪ Startup chime…':'♪ Playing Imperial March…'):'♪ Imperial March';
+  const track=s?.buzzer?.track??2;
+  march.disabled=march.disabled||v.hello?.buzzer_melody!==true||!s?.buzzer||playing||!!s?.gpio.pwm;
+  march.textContent=playing&&track===2?'♪ Playing Imperial March…':'♪ Imperial March';
+  const birthday=$('birthday-button');
+  birthday.disabled=birthday.disabled||v.hello?.buzzer_melody!==true||v.hello?.birthday_melody!==true||!s?.buzzer||playing||!!s?.gpio.pwm;
+  birthday.textContent=playing&&track===3?'♪ Playing Happy Birthday…':'♪ Happy Birthday';
+  const melodyName=track===1?'Startup chime':track===3?'Happy Birthday':'Imperial March';
   $('update-firmware').disabled=!live||!good||!!v.pending||v.batch.length>0||v.firmware.state!=='checked'||v.hello?.software_dfu!==true||v.updating||!!s?.gpio.pwm;
   $('update-firmware').disabled||=playing;
   $('check-firmware').disabled=v.updating;
@@ -152,14 +160,15 @@ function render(v){
     groundTrack(s,v.history);const g=good?s.gnss:null,fix=g&&gnssGood(s);
     details('gnss-details',[['Receiver',g?.version||'—'],['Position quality',fix?'3D fix reported':'No valid 3D fix'],['Latitude',fix?number(g.lat_e7/1e7,7)+'°':'—'],['Longitude',fix?number(g.lon_e7/1e7,7)+'°':'—'],['MSL altitude',fix&&finite(g.h_msl_mm)?number(g.h_msl_mm/1000,3)+' m':'—'],['Horizontal accuracy',fix?number(g.hacc_mm/1000,3)+' m':'—'],['Satellites',g?.frames?g.sv:'—'],['NAV frames / CRC errors',g?g.frames+' / '+g.crc_errors:'—'],['PPS count / interval',g?g.pps_count+' / '+g.pps_us+' µs':'—'],['Time of week',g?g.tow_ms+' ms':'—'],['UART RX / TX',g?g.rx_bytes+' / '+g.tx_bytes+' bytes':'—'],['Probe stage / status',g?g.failure_stage+' / '+g.failure_status:'—'],['UART errors / dropped',g?g.uart_errors+' / '+g.dropped:'—']]);
   }
+  if(currentView==='remote')window.AtlasRemote?.render(v,good);
   if(currentView==='links'){
     const r=good?s.radio:null,b=good?s.ble:null,u=good?s.usb:null;
-    details('radio-details',[['Transport',good&&s.attempted&128?(s.init[9]?'Initialization failed':'Initialized; peer unverified'):'Not tested'],['UART received',r?r.rx+' bytes':'—'],['Mode',r?(r.command?'Command':'Transparent'):'—'],['Last received bytes',r?.last_hex||'—'],['RSSI / SNR','Not exposed'],['RF delivery','Requires a peer acknowledgement']]);
+    window.AtlasRadio?.render(v,good);
     details('ble-details',[['Model',b?.model||'—'],['Firmware',b?.firmware||'—'],['Mode',b?(b.command?'Command':'Data'):'—'],['RX / TX',b?b.rx+' / '+b.tx+' bytes':'—'],['DTR / timeouts',b?b.dtr+' / '+b.timeouts:'—'],['Last received bytes',b?.last_hex||'—']]);
     details('usb-details',[['Device',v.port|| (demoMode?'SIMULATED':'—')],['Session',u?.session],['RX / completed TX',u?u.rx+' / '+u.tx+' bytes':'—'],['RX / TX drops',u?u.rx_drop+' / '+u.tx_drop:'—'],['Timeouts',u?.timeouts],['Rejected telemetry',v.decoder_errors]]);
   }
   if(currentView==='tests'){
-    $('buzzer-status').textContent=demoMode?'Hardware playback is disabled in demo.':!good?'Connect Atlas with Bringup 1.1.1 or later.':v.hello?.buzzer_melody!==true||!s.buzzer?'Firmware update required · Bringup 1.1.1 or later.':playing?`Playing note ${s.buzzer.note} / ${s.buzzer.notes} · ${s.buzzer.hz?s.buzzer.hz+' Hz':'rest'} · Stop indicators cancels.`:s.buzzer.status?`Last melody stopped with driver status ${s.buzzer.status}.`:`Ready · ${v.hello.march_notes??33} notes · ${number((v.hello.march_ms??11360)/1000,2)} seconds.`;
+    $('buzzer-status').textContent=demoMode?'Hardware playback is disabled in demo.':!good?'Connect Atlas to play a melody.':v.hello?.buzzer_melody!==true||!s.buzzer?'Firmware update required · Bringup 1.1.1 or later.':playing?`${melodyName} · Playing note ${s.buzzer.note} / ${s.buzzer.notes} · ${s.buzzer.hz?s.buzzer.hz+' Hz':'rest'} · Stop indicators cancels.`:s.buzzer.status?`Last melody stopped with driver status ${s.buzzer.status}.`:`Ready · Imperial March ${number((v.hello.march_ms??11360)/1000,2)} s · ${v.hello.birthday_melody===true?'Happy Birthday '+number((v.hello.birthday_ms??12000)/1000,2)+' s':'Happy Birthday requires firmware 1.2.6 or later'}.`;
     const fsNames=['OK','Disk I/O error','Internal filesystem error','Not mounted / card unavailable','File missing: prepare ATLAS.TXT','Path missing','Invalid filename','Access denied','ATLASCHK.TST already exists — preserved','Invalid file object','Write protected','Invalid drive','Not enabled','No FAT filesystem','Format aborted','Timeout','Locked','Out of memory','Too many open files','Invalid parameter'];
     $('sd-summary').textContent=good?(s.sd.card?'Card detected':'No card')+' · '+(s.sd.mounted?'Mounted':'Unmounted')+' · '+(fsNames[s.sd.fs]||'FatFs '+s.sd.fs)+(s.sd.stage!==undefined?' · controller stage '+s.sd.stage+' · HAL '+s.sd.hal_status+' / 0x'+s.sd.hal_error.toString(16):'')+' · '+s.sd.completed+' operations · '+s.sd.errors+' errors':'Awaiting storage telemetry.';
     $('operation-status').textContent=v.blocked|| (v.pending?'Running: '+v.pending+(v.batch.length?' · '+v.batch.length+' sensor probes remaining':''):'No operation pending.');
@@ -175,25 +184,28 @@ function render(v){
 }
 let stateReadSerial=0, stateAppliedSerial=0;
 async function pollOnce(){
-  const serial=++stateReadSerial,servoView=currentView==='servos',next=await api(servoView?'servo-state':'state');
-  if(servoView&&currentView!=='servos')return; // History-free responses must not replace another view.
+  const serial=++stateReadSerial,servoView=['servos','stabilization'].includes(currentView),next=await api(servoView?'servo-state':'state');
+  if(servoView&&!['servos','stabilization'].includes(currentView))return; // Compact responses only belong in control views.
   if(serial<stateAppliedSerial)return; // An older HTTP response cannot roll back Stop/enable state.
   stateAppliedSerial=serial;state=next;networkFailed=false;render(state);
 }
-async function polling(){try{await pollOnce();}catch(error){networkFailed=true;if(state)render(state);else{$('notice').textContent='The local server is unavailable. Start Atlas Ground Station and reload.';}}finally{setTimeout(polling,currentView==='servos'?40:700);}}
+async function polling(){try{await pollOnce();}catch(error){networkFailed=true;if(state)render(state);else{$('notice').textContent='The local server is unavailable. Start Atlas Ground Station and reload.';}}finally{setTimeout(polling,['servos','stabilization'].includes(currentView)?40:700);}}
 async function ports(){try{const list=await api('ports');$('port-select').innerHTML='<option value="">Select the Atlas port</option>'+list.map(p=>`<option value="${esc(p.device)}">${esc(p.device+' · '+p.description)}</option>`).join('');}catch(error){toast(error.message);}}
 async function command(verb){
   let copy='';
-  if(verb.startsWith('radio '))copy='This communicates with the RFD900x modem. Confirm the correct radio, antenna, power and regional configuration are ready. Sending test text can transmit RF; it does not prove receipt.';
+  if(verb==='radio connect')copy='Start a two-way test, then check the peer every three seconds. The result requires a reply from another Atlas running firmware 1.4.0 or later. Monitoring continues without USB until stopped or Atlas restarts.';
+  else if(verb==='radio ping')copy='Send one numbered radio test. Atlas will report the responding board and round-trip time, or report no reply after two seconds.';
+  else if(verb==='radio id')copy='Read the local modem identity. Pause telemetry and stop monitoring on both boards first so the modem can enter its guarded command mode.';
   else if(verb==='sd test')copy='Create ATLASCHK.TST on the inserted expendable FAT card, write the test pattern and compare it. Existing files are preserved. Do not remove power or the card during the operation.';
   else if(verb.startsWith('ble '))copy='Apply this explicit BLE operation. The SPS profile is volatile. A ping sends fixed test text; verify receipt on your paired client.';
   else if(verb.startsWith('gpio ')&&verb!=='gpio 0')copy='Drive this logic GPIO high for one second. Confirm only the intended inert loopback or measurement fixture is attached.';
   else if(verb==='uart'||verb==='spi'||verb.startsWith('i2c '))copy='Confirm the documented expansion test fixture and voltage levels. This sends bytes on the selected physical bus.';
   else if(verb==='beep')copy='Drive the buzzer for a requested 200 ms pulse. Keep motors, servos and energetic loads disconnected.';
   else if(verb==='march')copy=`Play the ${state.hello.march_notes??33}-note arrangement for ${number((state.hello.march_ms??11360)/1000,2)} seconds. Stop indicators cancels playback. Keep motors, servos and pyro loads disconnected.`;
+  else if(verb==='birthday')copy=`Play Happy Birthday once (${number((state.hello.birthday_ms??12000)/1000,2)} seconds). Stop indicators cancels playback. Keep motors, servos and pyro loads disconnected.`;
   else if(verb.startsWith('utc '))copy='Set the board RTC to this laptop’s current UTC. This changes timestamps used by storage operations.';
   if(copy&&!await confirmAction(verb,copy))return;
-  await act('command',{verb,action_confirmed:!!copy||verb==='gpio 0'});
+  await act('command',{verb,action_confirmed:!!copy||verb==='gpio 0'||verb==='radio disconnect'||['telemetry on','telemetry off'].includes(verb)});
 }
 document.addEventListener('click',event=>{
   const nav=event.target.closest('[data-view]');if(nav){showView(nav.dataset.view);return;}

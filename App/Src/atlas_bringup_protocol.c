@@ -72,6 +72,7 @@ bool AtlasBench_Parse(const char *line, AtlasBenchCommand *command)
         {"hello", ATLAS_BENCH_HELLO},    {"status", ATLAS_BENCH_STATUS},
         {"beep", ATLAS_BENCH_BEEP},      {"stop", ATLAS_BENCH_STOP},
         {"march", ATLAS_BENCH_MARCH},
+        {"birthday", ATLAS_BENCH_BIRTHDAY},
         {"uart", ATLAS_BENCH_UART_TEST}, {"spi", ATLAS_BENCH_SPI_TEST}};
     if (count == 2U)
     {
@@ -95,6 +96,23 @@ bool AtlasBench_Parse(const char *line, AtlasBenchCommand *command)
     }
     /* Parsed everywhere so ordinary Bringup explicitly returns UNSUPPORTED.
      * Only ServoBench compiles an executor; no generic PWM/pyro writes exist. */
+    if(strcmp(token[1],"stabilize")==0)
+    {
+        parsed.operation=ATLAS_BENCH_STABILIZATION;
+        if(count==3U && strcmp(token[2],"off")==0) parsed.argument[0]=0U;
+        else if(count==3U && strcmp(token[2],"on")==0) parsed.argument[0]=1U;
+        else if(count==4U && (strcmp(token[2],"calibrate")==0 || strcmp(token[2],"directions")==0) &&
+                bench_number(token[3],&parsed.argument[1]) && parsed.argument[1]<=15U)
+            parsed.argument[0]=strcmp(token[2],"calibrate")==0?2U:3U;
+        else return false;
+        *command=parsed; return true;
+    }
+    if(strcmp(token[1],"telemetry")==0)
+    {
+        if(count!=3U || (strcmp(token[2],"on")!=0 && strcmp(token[2],"off")!=0))return false;
+        parsed.operation=ATLAS_BENCH_TELEMETRY;parsed.argument[0]=strcmp(token[2],"on")==0?1U:0U;
+        *command=parsed;return true;
+    }
     if (strcmp(token[1], "servo") == 0)
     {
         if (count == 3U && strcmp(token[2], "stop") == 0)
@@ -108,6 +126,11 @@ bool AtlasBench_Parse(const char *line, AtlasBenchCommand *command)
                  bench_number(token[3], &parsed.argument[0]) && parsed.argument[0] >= 1U && parsed.argument[0] <= 8U &&
                  bench_number(token[4], &parsed.argument[1]) && parsed.argument[1] >= 900U && parsed.argument[1] <= 2100U)
             parsed.operation = ATLAS_BENCH_SERVO_SET;
+        else if (count == 5U && strcmp(token[2], "sweep") == 0 &&
+                 bench_number(token[3], &parsed.argument[0]) && parsed.argument[0] >= 1U && parsed.argument[0] <= 8U &&
+                 bench_number(token[4], &parsed.argument[1]) &&
+                 (parsed.argument[1] == 1000U || parsed.argument[1] == 2000U))
+            parsed.operation = ATLAS_BENCH_SERVO_SWEEP;
         else return false;
         *command = parsed;
         return true;
@@ -151,7 +174,9 @@ bool AtlasBench_Parse(const char *line, AtlasBenchCommand *command)
             {"sd", "test", ATLAS_BENCH_SD_TEST},         {"sd", "unmount", ATLAS_BENCH_SD_UNMOUNT},
             {"ble", "profile", ATLAS_BENCH_BLE_PROFILE}, {"ble", "data", ATLAS_BENCH_BLE_DATA},
             {"ble", "command", ATLAS_BENCH_BLE_COMMAND}, {"ble", "ping", ATLAS_BENCH_BLE_PING},
-            {"radio", "id", ATLAS_BENCH_RADIO_ID},       {"radio", "ping", ATLAS_BENCH_RADIO_PING}};
+            {"radio", "id", ATLAS_BENCH_RADIO_ID},       {"radio", "ping", ATLAS_BENCH_RADIO_PING},
+            {"radio", "connect", ATLAS_BENCH_RADIO_CONNECT},
+            {"radio", "disconnect", ATLAS_BENCH_RADIO_DISCONNECT}};
         for (size_t i = 0U; i < sizeof(pairs) / sizeof(pairs[0]); ++i)
             if (strcmp(token[1], pairs[i].verb) == 0 && strcmp(token[2], pairs[i].word) == 0)
             {
