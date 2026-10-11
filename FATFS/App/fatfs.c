@@ -17,7 +17,6 @@
   */
 /* USER CODE END Header */
 #include "fatfs.h"
-#include "atlas_storage.h"
 
 uint8_t retSD;    /* Return value for SD */
 char SDPath[4];   /* SD logical drive path */
@@ -25,6 +24,7 @@ FATFS SDFatFS;    /* File system object for SD logical drive */
 FIL SDFile;       /* File object for SD */
 
 /* USER CODE BEGIN Variables */
+#include "atlas_storage.h"
 
 /* USER CODE END Variables */
 

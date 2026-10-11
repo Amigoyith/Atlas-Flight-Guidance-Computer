@@ -367,7 +367,7 @@
           <state>$PROJ_DIR$/../USB_DEVICE/App</state>
           <state>$PROJ_DIR$/../USB_DEVICE/Target</state>
           <state>$PROJ_DIR$/../Middlewares/Third_Party/FatFs/src</state>
-          <state>$PROJ_DIR$/../Middlewares/ST/STM32_USB_Device_Library/Core/Inc</state>
+          <state>$PROJ_DIR$/../App/CubeOverrides/Middlewares/ST/STM32_USB_Device_Library/Core/Inc</state>
           <state>$PROJ_DIR$/../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc</state>
         </option>
         <option>
@@ -1130,6 +1130,7 @@
         <file><name>$PROJ_DIR$/../App/Src/atlas_rtos.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_rtos_policy.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_sample_ring.c</name></file>
+        <file><name>$PROJ_DIR$/../App/Src/atlas_sd.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_spi_device.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_status.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_time.c</name></file>
@@ -1137,6 +1138,7 @@
         <file><name>$PROJ_DIR$/../App/Src/atlas_bringup.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_bringup_protocol.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_usb.c</name></file>
+        <file><name>$PROJ_DIR$/../App/Src/atlas_usb_cdc.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_uart_transport.c</name></file>
       </group>
       <group>
@@ -1147,7 +1149,7 @@
             <name>$PROJ_DIR$/../FATFS/Target/bsp_driver_sd.c</name>
           </file>
           <file>
-            <name>$PROJ_DIR$/../FATFS/Target/sd_diskio.c</name>
+            <name>$PROJ_DIR$/../App/CubeOverrides/FATFS/Target/sd_diskio.c</name>
           </file>
         </group>
         <group>
@@ -1174,7 +1176,7 @@
         <group>
           <name>Target</name>
           <file>
-            <name>$PROJ_DIR$/../USB_DEVICE/Target/usbd_conf.c</name>
+            <name>$PROJ_DIR$/../App/CubeOverrides/USB_DEVICE/Target/usbd_conf.c</name>
           </file>
         </group>
       </group>
@@ -1342,7 +1344,7 @@
     <group>
       <name>USB_Device_Library</name>
       <file>
-        <name>$PROJ_DIR$/../Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c</name>
+        <name>$PROJ_DIR$/../App/CubeOverrides/Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c</name>
       </file>
       <file>
         <name>$PROJ_DIR$/../Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ctlreq.c</name>
@@ -1351,7 +1353,7 @@
         <name>$PROJ_DIR$/../Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ioreq.c</name>
       </file>
       <file>
-        <name>$PROJ_DIR$/../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c</name>
+        <name>$PROJ_DIR$/../App/CubeOverrides/Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c</name>
       </file>
     </group>
   </group>

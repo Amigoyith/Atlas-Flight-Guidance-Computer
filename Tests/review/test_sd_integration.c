@@ -6,7 +6,7 @@
  * R04/R05's old callback model is replaced because production no longer uses IDMA.
  */
 #include "ff_gen_drv.h"
-#include "bsp_driver_sd.h"
+#include "atlas_sd.h"
 #include "sd_diskio.h"
 #include "atlas_time.h"
 #include <stdbool.h>
@@ -59,7 +59,7 @@ HAL_StatusTypeDef HAL_SD_ReadBlocks(SD_HandleTypeDef *sd, uint8_t *data,
     CHECK(count == 1U && address < SECTORS && timeout <= 250U && timeout != 0U);
     CHECK(((uintptr_t)data & 3U) == 0U);
     ++io_count;
-    if (remove_during_io) { present = false; BSP_SD_DetectFromISR(); return HAL_ERROR; }
+    if (remove_during_io) { present = false; AtlasSd_DetectFromISR(); return HAL_ERROR; }
     if (timeout_io) { sd->ErrorCode = 0x20U; tick += timeout; return HAL_TIMEOUT; }
     memcpy(data, media[address], 512);
     return HAL_OK;
@@ -102,7 +102,7 @@ int main(void)
     uint8_t unaligned[1025];
     memset(media[7], 0xA5, 512);
     CHECK(SD_Driver.disk_initialize(0) != 0); /* No implicit first mount. */
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     CHECK(SD_Driver.disk_initialize(0) == 0 && !bad_handle);
     puts("PASS R03: fully configured SD handle, initial 1-bit and negotiated 4-bit bus");
     CHECK(SD_Driver.disk_read(0, unaligned + 1, 7, 1) == RES_OK);
@@ -123,16 +123,16 @@ int main(void)
     const uint32_t reset_before = reset_count;
     CHECK(SD_Driver.disk_read(0, unaligned, 0, 1) == RES_ERROR);
     CHECK(reset_count > reset_before && hsd1.Instance == NULL);
-    BSP_SD_Diagnostics diagnostic;
-    BSP_SD_GetDiagnostics(&diagnostic);
+    AtlasSdDiagnostics diagnostic;
+    AtlasSd_GetDiagnostics(&diagnostic);
     CHECK(diagnostic.stage == 4U && diagnostic.hal_status == HAL_TIMEOUT && diagnostic.hal_error == 0x20U);
     CHECK(hsd1.ErrorCode == 0U); /* Controller reset must not erase the retained failure. */
     CHECK(SD_Driver.disk_read(0, unaligned, 0, 1) == RES_NOTRDY);
     timeout_io = false;
     CHECK(SD_Driver.disk_initialize(0) != 0); /* Fault consumes old mount authority. */
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     CHECK(SD_Driver.disk_initialize(0) == 0);
-    BSP_SD_GetDiagnostics(&diagnostic);
+    AtlasSd_GetDiagnostics(&diagnostic);
     CHECK(diagnostic.stage == 0U && diagnostic.hal_error == 0U); /* Explicit remount resets history. */
     busy_card = true;
     const uint32_t wait_start = tick;
@@ -142,23 +142,23 @@ int main(void)
     puts("PASS R05: bounded readiness waits, timeout reset, no retained DMA ownership");
 
     present = false;
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     CHECK(SD_Driver.disk_initialize(0) != 0);
     present = true;
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     CHECK(SD_Driver.disk_initialize(0) == 0);
-    BSP_SD_DetectFromISR(); BSP_SD_DetectFromISR(); /* Remove/reinsert before polling. */
+    AtlasSd_DetectFromISR(); AtlasSd_DetectFromISR(); /* Remove/reinsert before polling. */
     CHECK(SD_Driver.disk_read(0, unaligned, 0, 1) == RES_NOTRDY);
     CHECK(SD_Driver.disk_initialize(0) != 0);
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     CHECK(SD_Driver.disk_initialize(0) == 0);
     remove_during_io = true;
     CHECK(SD_Driver.disk_read(0, unaligned, 0, 1) == RES_ERROR);
     remove_during_io = false; present = true;
     fail_init = true;
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     CHECK(SD_Driver.disk_initialize(0) != 0 && hsd1.Instance == NULL);
-    BSP_SD_GetDiagnostics(&diagnostic);
+    AtlasSd_GetDiagnostics(&diagnostic);
     CHECK(diagnostic.stage == 2U && diagnostic.hal_status == HAL_ERROR && diagnostic.hal_error == 0x40000000U);
     CHECK(diagnostic.detect_edges >= 3U);
     fail_init = false;
@@ -171,7 +171,7 @@ int main(void)
     char path[4], readback[8] = {0};
     UINT count;
     CHECK(FATFS_LinkDriver(&SD_Driver, path) == 0);
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     CHECK(f_mount(&volume, path, 1) == FR_OK);
     CHECK(f_open(&file, "0:/TEST.BIN", FA_WRITE | FA_OPEN_ALWAYS) == FR_OK);
     CHECK(f_write(&file, "abc", 3, &count) == FR_OK && count == 3);
@@ -183,13 +183,13 @@ int main(void)
     CHECK(f_open(&file, "0:/TEST.BIN", FA_READ) == FR_OK);
     CHECK(f_read(&file, readback, sizeof(readback), &count) == FR_OK && count == 5);
     CHECK(memcmp(readback, "abcde", 5) == 0 && f_close(&file) == FR_OK);
-    BSP_SD_DetectFromISR(); BSP_SD_DetectFromISR();
+    AtlasSd_DetectFromISR(); AtlasSd_DetectFromISR();
     const uint32_t before_implicit = io_count;
     CHECK(f_open(&file, "0:/TEST.BIN", FA_WRITE | FA_OPEN_ALWAYS) == FR_NOT_READY);
     CHECK(io_count == before_implicit); /* Cached FAT cannot redirect a write. */
     CHECK(SD_Driver.disk_initialize(0) != 0);
     CHECK(f_mount(NULL, path, 0) == FR_OK);
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     CHECK(f_mount(&volume, path, 1) == FR_OK); /* ST glue cache must not skip init. */
     CHECK(f_open(&file, "0:/TEST.BIN", FA_READ) == FR_OK);
     CHECK(f_read(&file, readback, sizeof(readback), &count) == FR_OK && count == 5);

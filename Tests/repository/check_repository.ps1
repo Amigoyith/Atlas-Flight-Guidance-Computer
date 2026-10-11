@@ -7,6 +7,7 @@ Major functions:
 - Resolve local Markdown targets and ATX-heading anchors outside fenced code.
 - Reject raw KiCad sources, obsolete Atlas_Origins paths, and build artifacts.
 - Require the consolidated documentation hub and Doxygen tags for App firmware.
+- Require every App/CubeOverrides file to mirror a CubeMX-generated path.
 - Verify RTOS static-allocation policy and CMake/IAR source membership.
 
 The script is read-only. Build directories and Git internals are excluded so a
@@ -355,8 +356,25 @@ foreach ($file in $markdownFiles) {
     }
 }
 
+# App/CubeOverrides holds replacements of CubeMX-generated (often ST-authored)
+# files. They keep their original headers but must still mirror a generated path,
+# otherwise the build silently compiles nothing in their place.
+$cubeOverridesRoot = Join-Path $repositoryRoot "App\CubeOverrides"
+$cubeOverrideFiles = @()
+if (Test-Path -LiteralPath $cubeOverridesRoot) {
+    $cubeOverrideFiles = @(Get-ChildItem -LiteralPath $cubeOverridesRoot -Recurse -File)
+}
+foreach ($file in $cubeOverrideFiles) {
+    $mirroredPath = $file.FullName.Substring($cubeOverridesRoot.Length + 1)
+    if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $mirroredPath))) {
+        $failures.Add("CubeMX override mirrors no generated file: App\CubeOverrides\$mirroredPath")
+    }
+}
+
 $appFiles = @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "App") -Recurse -File |
-    Where-Object { $_.Extension -in ".c", ".h" })
+    Where-Object { ($_.Extension -in ".c", ".h") -and
+        -not $_.FullName.StartsWith($cubeOverridesRoot + [System.IO.Path]::DirectorySeparatorChar,
+            [System.StringComparison]::OrdinalIgnoreCase) })
 foreach ($file in $appFiles) {
     $content = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
     $escapedName = [regex]::Escape($file.Name)

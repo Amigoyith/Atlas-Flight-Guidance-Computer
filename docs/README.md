@@ -15,6 +15,7 @@
 | Know whether a subsystem is usable and how to accept it | [Systems and readiness](SYSTEMS.md) |
 | Use SD, USB, ADC, GPIO, PWM, pyro, expansion or commissioning APIs | [Peripheral services](PERIPHERALS.md) |
 | Build, test, add code, or review a change | [Development and engineering standards](DEVELOPMENT.md) |
+| Change pins, clocks, DMA or interrupts in CubeMX and regenerate | [CubeMX regeneration](CUBEMX.md) |
 | Understand a reported defect or the latest review evidence | [Current review report](REVIEW_REPORT.md) |
 | Work on task ownership, timing, snapshots, or watchdogs | [RTOS reference](reference/RTOS.md) |
 | Trace connectors, rails, pin assignments, or hardware conflicts | [Hardware reference](reference/HARDWARE.md) |

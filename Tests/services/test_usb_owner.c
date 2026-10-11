@@ -26,8 +26,8 @@ HAL_StatusTypeDef USB_DevDisconnect(const void *instance)
 { assert(instance==USB_OTG_FS);++pullup_drops;return HAL_OK; }
 void HAL_NVIC_DisableIRQ(int irq) { assert(irq==OTG_FS_IRQn); }
 void HAL_NVIC_ClearPendingIRQ(int irq) { assert(irq==OTG_FS_IRQn && test_primask==0U); }
-bool CDC_TransmitBusy_FS(void) { return busy; }
-uint8_t CDC_Transmit_FS(uint8_t *data,uint16_t length)
+bool AtlasUsbCdc_TransmitBusy(void) { return busy; }
+uint8_t AtlasUsbCdc_Transmit(const uint8_t *data,uint16_t length)
 {
     if(!health.configured)return USBD_FAIL;
     if(busy)return USBD_BUSY;

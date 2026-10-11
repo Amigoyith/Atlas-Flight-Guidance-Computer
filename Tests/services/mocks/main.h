@@ -161,6 +161,7 @@ void TestSetPrimask(uint32_t mask);
 #define CS_LSM6DSV16B_GPIO_Port GPIOG
 #define BNO085_H_INTN_Pin (1U<<0)
 #define BNO085_H_INTN_GPIO_Port GPIOG
+void HAL_PWREx_EnableUSBVoltageDetector(void);
 HAL_StatusTypeDef HAL_SPI_TransmitReceive(SPI_HandleTypeDef *spi,uint8_t *tx,uint8_t *rx,uint16_t size,uint32_t timeout);
 HAL_StatusTypeDef HAL_I2C_Master_Transmit(I2C_HandleTypeDef *i2c,uint16_t address,uint8_t *data,uint16_t size,uint32_t timeout);
 HAL_StatusTypeDef HAL_I2C_Master_Receive(I2C_HandleTypeDef *i2c,uint16_t address,uint8_t *data,uint16_t size,uint32_t timeout);

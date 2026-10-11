@@ -56,8 +56,8 @@ try {
         @{
             # The bundled ff_gen_drv.c has an unused lun parameter; all other warnings fail.
             Name = 'sd'; Flags = @('-Wno-unused-parameter'); Sources = @(
-                'Tests/review/test_sd_integration.c', 'FATFS/Target/bsp_driver_sd.c',
-                'FATFS/Target/sd_diskio.c', 'Middlewares/Third_Party/FatFs/src/ff.c',
+                'Tests/review/test_sd_integration.c', 'App/Src/atlas_sd.c',
+                'App/CubeOverrides/FATFS/Target/sd_diskio.c', 'Middlewares/Third_Party/FatFs/src/ff.c',
                 'Middlewares/Third_Party/FatFs/src/ff_gen_drv.c',
                 'Middlewares/Third_Party/FatFs/src/diskio.c')
         }

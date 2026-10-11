@@ -638,12 +638,7 @@ USBD_StatusTypeDef USBD_LL_DataOutStage(USBD_HandleTypeDef *pdev,
             if (pdev->pClass[idx]->EP0_RxReady != NULL)
             {
               pdev->classId = idx;
-              /* Atlas local fix: an invalid control payload must stall, not ACK. */
-              if (pdev->pClass[idx]->EP0_RxReady(pdev) != (uint8_t)USBD_OK)
-              {
-                USBD_CtlError(pdev, &pdev->request);
-                return USBD_FAIL;
-              }
+              pdev->pClass[idx]->EP0_RxReady(pdev);
             }
           }
         }
@@ -1223,3 +1218,4 @@ USBD_DescHeaderTypeDef *USBD_GetNextDesc(uint8_t *pbuf, uint16_t *ptr)
 /**
   * @}
   */
+

@@ -42,6 +42,9 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# Build Atlas replacements of generated files that have no USER CODE hooks
+include(cmake/atlas_cube_overrides.cmake)
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -75,6 +78,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_rtos.c
     App/Src/atlas_rtos_policy.c
     App/Src/atlas_sample_ring.c
+    App/Src/atlas_sd.c
     App/Src/atlas_spi_device.c
     App/Src/atlas_status.c
     App/Src/atlas_stabilization.c
@@ -82,6 +86,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_time.c
     App/Src/atlas_uart_transport.c
     App/Src/atlas_usb.c
+    App/Src/atlas_usb_cdc.c
     ThirdParty/CEVA/sh2/sh2.c
     ThirdParty/CEVA/sh2/sh2_SensorValue.c
     ThirdParty/CEVA/sh2/sh2_util.c

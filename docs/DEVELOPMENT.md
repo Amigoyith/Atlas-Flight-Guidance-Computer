@@ -134,9 +134,9 @@ Use `AtlasRtos_SubmitCommand()` for indicators/links and the separate [periphera
 
 ## Generated code and dependencies
 
-Keep hand-written logic in `App/`; treat `Core/`, `FATFS/`, `USB_DEVICE/`, `cmake/stm32cubemx/` and generator-managed EWARM settings carefully. Preserve `USER CODE` regions. Do not modify vendor trees to hide integration faults; carry any necessary vendor patch explicitly with provenance.
+Keep hand-written logic in `App/`. `Core/`, `FATFS/`, `USB_DEVICE/`, `Drivers/`, `Middlewares/` and `cmake/stm32cubemx/` belong to CubeMX: edit them only inside `USER CODE` regions. Replacements of generated files without hooks live in `App/CubeOverrides/`; [CubeMX regeneration](CUBEMX.md) explains the ownership rules and workflow. Do not modify vendor trees to hide integration faults; carry any necessary vendor patch explicitly with provenance.
 
-Before regeneration, record a clean baseline and use STM32CubeMX **6.17.0** with STM32Cube FW_H7 **1.13.0** unless upgrading is the reviewed task. Generate into a disposable comparison copy. Review clocks, GPIO states, DMA, IRQs, middleware, source membership, linker files and all manual RTOS hooks before merging. Preserve the explicit main-stack/MPU-guard placement and rejecting `Core/Src/sysmem.c` heap boundary. Build Debug/Release and repeat affected acceptance tests. Dependency versions and update rules are in [Provenance](reference/PROVENANCE.md).
+Before regeneration, record a clean baseline and use STM32CubeMX **6.18.1** with STM32Cube FW_H7 **1.13.0** unless upgrading is the reviewed task. Generate into a disposable comparison copy. Review clocks, GPIO states, DMA, IRQs, middleware, source membership, linker files and all manual RTOS hooks before merging. Preserve the explicit main-stack/MPU-guard placement and rejecting `Core/Src/sysmem.c` heap boundary. Build Debug/Release and repeat affected acceptance tests. Dependency versions and update rules are in [Provenance](reference/PROVENANCE.md).
 
 ## Change and release checklist
 

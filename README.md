@@ -20,15 +20,15 @@ For implementation, use [Peripheral services](docs/PERIPHERALS.md) and [Developm
 
 | Location | Purpose |
 |---|---|
-| [App](App/) | Drivers, RTOS ownership, typed snapshots, copied commands and safety policy |
-| [Core](Core/), [FATFS](FATFS/), [USB_DEVICE](USB_DEVICE/) | Generated setup plus maintained board/filesystem/USB integration |
+| [App](App/) | Drivers, RTOS ownership, typed snapshots, copied commands and safety policy; `App/CubeOverrides` replaces hook-less generated files |
+| [Core](Core/), [FATFS](FATFS/), [USB_DEVICE](USB_DEVICE/) | CubeMX-generated; Atlas hooks only inside USER CODE blocks ([regeneration](docs/CUBEMX.md)) |
 | [Tests](Tests/) | Protocol, integration, service-model and repository checks |
 | [tools/bringup](tools/bringup/) | Offline-capable desktop dashboard, image verification and safe SD fixtures |
 | [docs](docs/README.md) | Central documentation; references are optional, not a reading chain |
 | [hardware](hardware/README.md) | Schematic PDF, BOM and candidate manufacturing exports |
-| [ThirdParty](ThirdParty/), [Drivers](Drivers/), [Middlewares](Middlewares/) | Pinned dependencies; local USB patches are documented in provenance |
+| [ThirdParty](ThirdParty/), [Drivers](Drivers/), [Middlewares](Middlewares/) | Pinned dependencies; local USB patches live in `App/CubeOverrides` and are documented in provenance |
 | [CMakeLists.txt](CMakeLists.txt), [EWARM](EWARM/) | Arm GNU and IAR project definitions |
-| [Atlas.ioc](Atlas.ioc) | Generator inputs; runtime overrides and manual integrations must survive regeneration |
+| [Atlas.ioc](Atlas.ioc) | Hardware configuration; regenerate and build directly ([CubeMX regeneration](docs/CUBEMX.md)) |
 
 ## Safety and provenance
 

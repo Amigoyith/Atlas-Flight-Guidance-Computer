@@ -15,9 +15,8 @@
 #include "atlas_usb.h"
 #include "atlas_build.h"
 #include "main.h"
-#include "usb_device.h"
+#include "atlas_usb_cdc.h"
 #include "usbd_core.h"
-#include "usbd_cdc_if.h"
 #include "FreeRTOS.h"
 #include "queue.h"
 #include "task.h"
@@ -178,7 +177,7 @@ static void usb_task(void *argument)
         }
         if (have_packet && !transmitting)
         {
-            const uint8_t result = CDC_Transmit_FS(packet.data, packet.length);
+            const uint8_t result = AtlasUsbCdc_Transmit(packet.data, packet.length);
             if (result == USBD_OK) { transmitting = true; tx_started = HAL_GetTick(); }
             else if (result != USBD_BUSY)
             {
@@ -186,7 +185,7 @@ static void usb_task(void *argument)
                 have_packet = false;
             }
         }
-        if (transmitting && !CDC_TransmitBusy_FS()) have_packet = transmitting = false;
+        if (transmitting && !AtlasUsbCdc_TransmitBusy()) have_packet = transmitting = false;
         const bool timeout = transmitting && (uint32_t)(HAL_GetTick() - tx_started) >= USB_TX_TIMEOUT_MS;
         if (timeout)
         {

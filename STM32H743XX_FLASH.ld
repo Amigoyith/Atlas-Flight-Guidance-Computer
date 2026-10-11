@@ -70,7 +70,7 @@ _estack = ORIGIN(DTCMRAM) + LENGTH(DTCMRAM) - 0x20;
 _sstack = _estack - _Min_Stack_Size;
 /* Generate a link error if heap and stack don't fit into RAM */
 _Min_Heap_Size = 0x0;      /* required amount of heap  */
-_Min_Stack_Size = 0x3FE0; /* 16 KiB less the 32-byte ROM entry reservation */
+_Min_Stack_Size = 0x3FE0; /* required amount of stack */
 __atlas_msp_guard_start__ = _sstack - 0x100;
 
 /* MPU_Config protects exactly 0x2001BF00..0x2001BFFF. Keep both

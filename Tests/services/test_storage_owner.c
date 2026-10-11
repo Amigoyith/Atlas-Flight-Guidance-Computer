@@ -34,12 +34,12 @@ HAL_StatusTypeDef HAL_RTC_GetTime(RTC_HandleTypeDef *r,RTC_TimeTypeDef *value,ui
 { (void)r;assert(format==RTC_FORMAT_BIN && !read_time_latched);read_time_latched=true;*value=calendar_time;return fail_read_time?HAL_ERROR:HAL_OK; }
 HAL_StatusTypeDef HAL_RTC_GetDate(RTC_HandleTypeDef *r,RTC_DateTypeDef *value,uint32_t format)
 { (void)r;assert(format==RTC_FORMAT_BIN && read_time_latched);read_time_latched=false;++get_dates;*value=calendar_date;return HAL_OK; }
-void SD_Invalidate(void) { current=false;authorized=false; }
-void SD_PrepareMount(void) { authorized=true; }
-uint8_t BSP_SD_IsMediaCurrent(void) { return current?1U:0U; }
-uint8_t BSP_SD_GetCardState(void) { return current?SD_TRANSFER_OK:SD_TRANSFER_ERROR; }
-uint8_t BSP_SD_IsDetected(void) { return present?SD_PRESENT:SD_NOT_PRESENT; }
-void BSP_SD_GetDiagnostics(BSP_SD_Diagnostics *output) { *output=(BSP_SD_Diagnostics){0}; }
+void AtlasSd_Invalidate(void) { current=false;authorized=false; }
+void AtlasSd_PrepareMount(void) { authorized=true; }
+uint8_t AtlasSd_IsMediaCurrent(void) { return current?1U:0U; }
+uint8_t AtlasSd_GetCardState(void) { return current?ATLAS_SD_TRANSFER_OK:ATLAS_SD_TRANSFER_ERROR; }
+uint8_t AtlasSd_IsDetected(void) { return present?ATLAS_SD_PRESENT:ATLAS_SD_NOT_PRESENT; }
+void AtlasSd_GetDiagnostics(AtlasSdDiagnostics *output) { *output=(AtlasSdDiagnostics){0}; }
 FRESULT f_mount(FATFS *fs,const TCHAR *path,BYTE option)
 {
     assert(strcmp(path,"0:")==0);

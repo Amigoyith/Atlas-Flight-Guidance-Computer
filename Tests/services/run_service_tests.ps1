@@ -22,12 +22,13 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -Wall -Wextra -Werror `
     -I (Join-Path $serviceRoot 'Tests/services/mocks') -I (Join-Path $serviceRoot 'App/Inc') `
     -I (Join-Path $serviceRoot 'USB_DEVICE/App') `
-    -I (Join-Path $serviceRoot 'Middlewares/ST/STM32_USB_Device_Library/Core/Inc') `
+    -I (Join-Path $serviceRoot 'App/CubeOverrides/Middlewares/ST/STM32_USB_Device_Library/Core/Inc') `
     -I (Join-Path $serviceRoot 'Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc') `
     (Join-Path $serviceRoot 'Tests/services/test_usb_cdc.c') `
     (Join-Path $serviceRoot 'USB_DEVICE/App/usbd_cdc_if.c') `
-    (Join-Path $serviceRoot 'Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c') `
-    (Join-Path $serviceRoot 'Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c') `
+    (Join-Path $serviceRoot 'App/Src/atlas_usb_cdc.c') `
+    (Join-Path $serviceRoot 'App/CubeOverrides/Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c') `
+    (Join-Path $serviceRoot 'App/CubeOverrides/Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c') `
     (Join-Path $serviceRoot 'Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ctlreq.c') `
     (Join-Path $serviceRoot 'Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ioreq.c') `
     -o (Join-Path $serviceOutput 'usb_cdc.exe')
@@ -37,7 +38,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -Wall -Wextra -Werror `
     -I (Join-Path $serviceRoot 'Tests/services/mocks') -I (Join-Path $serviceRoot 'App/Inc') `
     -I (Join-Path $serviceRoot 'USB_DEVICE/App') `
-    -I (Join-Path $serviceRoot 'Middlewares/ST/STM32_USB_Device_Library/Core/Inc') `
+    -I (Join-Path $serviceRoot 'App/CubeOverrides/Middlewares/ST/STM32_USB_Device_Library/Core/Inc') `
     -I (Join-Path $serviceRoot 'Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc') `
     (Join-Path $serviceRoot 'Tests/services/test_usb_owner.c') `
     (Join-Path $serviceRoot 'Tests/services/service_model.c') -o (Join-Path $serviceOutput 'usb_owner.exe')

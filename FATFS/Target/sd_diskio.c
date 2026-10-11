@@ -17,187 +17,241 @@
   */
 /* USER CODE END Header */
 
-/**
- * Atlas-owned polling FatFs adapter.
- * Major functions: SD_initialize()/status(), SD_read()/write(), SD_ioctl().
- * Single storage-task ownership replaces the generated unscoped DMA callbacks.
- * One sector at a time bounds FIFO service; the low-priority owner can be
- * preempted by control/sensor tasks. Higher-priority load may cause a safe I/O
- * timeout: this is a correctness-first baseline, not a throughput guarantee.
- */
+/* Note: code generation based on sd_diskio_template_bspv1.c v2.1.4
+   as "Use dma template" is disabled. */
+
+/* USER CODE BEGIN firstSection */
+/* can be used to modify / undefine following code or add new definitions */
+/* USER CODE END firstSection*/
+
+/* Includes ------------------------------------------------------------------*/
 #include "ff_gen_drv.h"
 #include "sd_diskio.h"
-#include "atlas_time.h"
-#include <stdbool.h>
-#include <string.h>
 
-#define SD_SECTOR_BYTES (512U)
-#define SD_TRANSFER_TIMEOUT_MS (250U)
-#define SD_READY_TIMEOUT_MS (1000U)
+/* Private typedef -----------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
+/* use the default SD timout as defined in the platform BSP driver*/
+#if defined(SDMMC_DATATIMEOUT)
+#define SD_TIMEOUT SDMMC_DATATIMEOUT
+#elif defined(SD_DATATIMEOUT)
+#define SD_TIMEOUT SD_DATATIMEOUT
+#else
+#define SD_TIMEOUT 30 * 1000
+#endif
 
-static DSTATUS sd_status = STA_NOINIT;
-static bool sd_mount_authorized;
-static BSP_SD_CardInfo sd_info;
-/* ST's diskio glue caches initialization separately from DSTATUS. Its cache
- * must be invalidated too, otherwise an explicit remount skips our real init. */
-extern Disk_drvTypeDef disk;
+#define SD_DEFAULT_BLOCK_SIZE 512
 
-/** @brief Reset media/controller after any ambiguous operation result. */
-void SD_Invalidate(void)
-{
-    sd_mount_authorized = false;
-    for (unsigned i = 0U; i < _VOLUMES; ++i)
-        if (disk.drv[i] == &SD_Driver) disk.is_initialized[i] = 0U;
-    BSP_SD_DeInit();
-    sd_status = STA_NOINIT;
-    memset(&sd_info, 0, sizeof(sd_info));
-}
-/** @brief Only the storage owner's MOUNT path may permit a new card session. */
-void SD_PrepareMount(void)
-{
-    SD_Invalidate();
-    sd_mount_authorized = true;
-}
-
-/** @brief Await card readiness with yielding, bounded retries. @return true when ready. */
-static bool sd_wait_ready(void)
-{
-    const uint32_t start = HAL_GetTick();
-    do
-    {
-        const uint8_t state = BSP_SD_GetCardState();
-        if (state == SD_TRANSFER_OK) return true;
-        if (state == SD_TRANSFER_ERROR) return false;
-        AtlasTime_DelayMs(1U);
-    } while ((uint32_t)(HAL_GetTick() - start) < SD_READY_TIMEOUT_MS);
-    return false;
-}
-
-/** @brief Initialize optional volume zero. @param lun Logical unit. @return Disk status. */
-static DSTATUS SD_initialize(BYTE lun)
-{
-    if (lun != 0U || !sd_mount_authorized) return STA_NOINIT;
-    sd_mount_authorized = false;
-    if (BSP_SD_Init() != MSD_OK ||
-        BSP_SD_GetCardInfo(&sd_info) != MSD_OK ||
-        sd_info.LogBlockSize != SD_SECTOR_BYTES || sd_info.LogBlockNbr == 0U ||
-        !sd_wait_ready())
-    {
-        SD_Invalidate();
-        return STA_NOINIT;
-    }
-    sd_status = 0U;
-    return sd_status;
-}
-
-/** @brief Reject a replaced card before FatFs can reuse cached metadata.
- * @param lun Unit. @return Current disk status, without implicit remount authority. */
-static DSTATUS SD_status(BYTE lun)
-{
-    if (lun == 0U && (sd_status & STA_NOINIT) == 0U && !BSP_SD_IsMediaCurrent()) SD_Invalidate();
-    return lun == 0U ? sd_status : STA_NOINIT;
-}
-
-/**
- * @brief Validate an LBA interval without overflow.
- * @param lun Unit. @param buffer Caller storage. @param sector First LBA.
- * @param count Number of sectors. @return FatFs result.
+/*
+ * Depending on the use case, the SD card initialization could be done at the
+ * application level: if it is the case define the flag below to disable
+ * the BSP_SD_Init() call in the SD_Initialize() and add a call to
+ * BSP_SD_Init() elsewhere in the application.
  */
-static DRESULT sd_validate(BYTE lun, const BYTE *buffer, DWORD sector, UINT count)
-{
-    if (lun != 0U || buffer == NULL || count == 0U) return RES_PARERR;
-    if ((SD_status(lun) & STA_NOINIT) != 0U) return RES_NOTRDY;
-    if (sector >= sd_info.LogBlockNbr ||
-        count > sd_info.LogBlockNbr - sector) return RES_PARERR;
-    return RES_OK;
-}
+/* USER CODE BEGIN disableSDInit */
+/* #define DISABLE_SD_INIT */
+/* USER CODE END disableSDInit */
 
-/**
- * @brief Read via an aligned CPU-only sector buffer, including unaligned callers.
- * @param lun Unit. @param buffer Destination. @param sector LBA. @param count Sectors.
- * @return RES_OK only after every sector and final card-ready check succeed.
- */
-static DRESULT SD_read(BYTE lun, BYTE *buffer, DWORD sector, UINT count)
-{
-    uint32_t scratch[SD_SECTOR_BYTES / sizeof(uint32_t)];
-    DRESULT result = sd_validate(lun, buffer, sector, count);
-    if (result != RES_OK) return result;
-    for (UINT i = 0U; i < count; ++i)
-    {
-        if (!sd_wait_ready() ||
-            BSP_SD_ReadBlocks(scratch, sector + i, 1U, SD_TRANSFER_TIMEOUT_MS) != MSD_OK ||
-            !sd_wait_ready())
-        {
-            SD_Invalidate();
-            return RES_ERROR;
-        }
-        memcpy(buffer, scratch, sizeof(scratch));
-        buffer += SD_SECTOR_BYTES;
-        if (i + 1U < count) AtlasTime_DelayMs(1U);
-    }
-    return RES_OK;
-}
+/* Private variables ---------------------------------------------------------*/
+/* Disk status */
+static volatile DSTATUS Stat = STA_NOINIT;
 
+/* Private function prototypes -----------------------------------------------*/
+static DSTATUS SD_CheckStatus(BYTE lun);
+DSTATUS SD_initialize (BYTE);
+DSTATUS SD_status (BYTE);
+DRESULT SD_read (BYTE, BYTE*, DWORD, UINT);
 #if _USE_WRITE == 1
-/**
- * @brief Write with synchronous buffer lifetime and post-programming readiness.
- * @param lun Unit. @param buffer Source. @param sector LBA. @param count Sectors.
- * @return FatFs result; an error may leave partially written media, never live DMA.
- */
-static DRESULT SD_write(BYTE lun, const BYTE *buffer, DWORD sector, UINT count)
-{
-    uint32_t scratch[SD_SECTOR_BYTES / sizeof(uint32_t)];
-    DRESULT result = sd_validate(lun, buffer, sector, count);
-    if (result != RES_OK) return result;
-    for (UINT i = 0U; i < count; ++i)
-    {
-        memcpy(scratch, buffer, sizeof(scratch));
-        if (!sd_wait_ready() ||
-            BSP_SD_WriteBlocks(scratch, sector + i, 1U, SD_TRANSFER_TIMEOUT_MS) != MSD_OK ||
-            !sd_wait_ready())
-        {
-            SD_Invalidate();
-            return RES_ERROR;
-        }
-        buffer += SD_SECTOR_BYTES;
-        if (i + 1U < count) AtlasTime_DelayMs(1U);
-    }
-    return RES_OK;
-}
-#endif
-
+DRESULT SD_write (BYTE, const BYTE*, DWORD, UINT);
+#endif /* _USE_WRITE == 1 */
 #if _USE_IOCTL == 1
-/** @brief Implement required FatFs controls. @param lun Unit. @param cmd Operation.
- * @param buffer Typed result destination (unused for CTRL_SYNC). @return FatFs result. */
-static DRESULT SD_ioctl(BYTE lun, BYTE cmd, void *buffer)
-{
-    if (lun != 0U) return RES_PARERR;
-    if ((SD_status(lun) & STA_NOINIT) != 0U) return RES_NOTRDY;
-    if (cmd == CTRL_SYNC)
-    {
-        if (sd_wait_ready()) return RES_OK;
-        SD_Invalidate();
-        return RES_ERROR;
-    }
-    if (buffer == NULL) return RES_PARERR;
-    switch (cmd)
-    {
-        case GET_SECTOR_COUNT: *(DWORD *)buffer = sd_info.LogBlockNbr; return RES_OK;
-        case GET_SECTOR_SIZE: *(WORD *)buffer = SD_SECTOR_BYTES; return RES_OK;
-        /* Unknown erase geometry: conservative one-sector allocation hint.
-           This is not an erase command or a physical erase-size assertion. */
-        case GET_BLOCK_SIZE: *(DWORD *)buffer = 1U; return RES_OK;
-        default: return RES_PARERR;
-    }
-}
-#endif
+DRESULT SD_ioctl (BYTE, BYTE, void*);
+#endif  /* _USE_IOCTL == 1 */
 
-const Diskio_drvTypeDef SD_Driver = {
-    SD_initialize, SD_status, SD_read,
-#if _USE_WRITE == 1
-    SD_write,
-#endif
-#if _USE_IOCTL == 1
-    SD_ioctl,
-#endif
+const Diskio_drvTypeDef  SD_Driver =
+{
+  SD_initialize,
+  SD_status,
+  SD_read,
+#if  _USE_WRITE == 1
+  SD_write,
+#endif /* _USE_WRITE == 1 */
+
+#if  _USE_IOCTL == 1
+  SD_ioctl,
+#endif /* _USE_IOCTL == 1 */
 };
+
+/* USER CODE BEGIN beforeFunctionSection */
+/* can be used to modify / undefine following code or add new code */
+/* USER CODE END beforeFunctionSection */
+
+/* Private functions ---------------------------------------------------------*/
+
+static DSTATUS SD_CheckStatus(BYTE lun)
+{
+  Stat = STA_NOINIT;
+
+  if(BSP_SD_GetCardState() == MSD_OK)
+  {
+    Stat &= ~STA_NOINIT;
+  }
+
+  return Stat;
+}
+
+/**
+  * @brief  Initializes a Drive
+  * @param  lun : not used
+  * @retval DSTATUS: Operation status
+  */
+DSTATUS SD_initialize(BYTE lun)
+{
+Stat = STA_NOINIT;
+
+#if !defined(DISABLE_SD_INIT)
+
+  if(BSP_SD_Init() == MSD_OK)
+  {
+    Stat = SD_CheckStatus(lun);
+  }
+
+#else
+  Stat = SD_CheckStatus(lun);
+#endif
+
+  return Stat;
+}
+
+/**
+  * @brief  Gets Disk Status
+  * @param  lun : not used
+  * @retval DSTATUS: Operation status
+  */
+DSTATUS SD_status(BYTE lun)
+{
+  return SD_CheckStatus(lun);
+}
+
+/* USER CODE BEGIN beforeReadSection */
+/* can be used to modify previous code / undefine following code / add new code */
+/* USER CODE END beforeReadSection */
+/**
+  * @brief  Reads Sector(s)
+  * @param  lun : not used
+  * @param  *buff: Data buffer to store read data
+  * @param  sector: Sector address (LBA)
+  * @param  count: Number of sectors to read (1..128)
+  * @retval DRESULT: Operation result
+  */
+
+DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
+{
+  DRESULT res = RES_ERROR;
+
+  if(BSP_SD_ReadBlocks((uint32_t*)buff,
+                       (uint32_t) (sector),
+                       count, SD_TIMEOUT) == MSD_OK)
+  {
+    /* wait until the read operation is finished */
+    while(BSP_SD_GetCardState()!= MSD_OK)
+    {
+    }
+    res = RES_OK;
+  }
+
+  return res;
+}
+
+/* USER CODE BEGIN beforeWriteSection */
+/* can be used to modify previous code / undefine following code / add new code */
+/* USER CODE END beforeWriteSection */
+/**
+  * @brief  Writes Sector(s)
+  * @param  lun : not used
+  * @param  *buff: Data to be written
+  * @param  sector: Sector address (LBA)
+  * @param  count: Number of sectors to write (1..128)
+  * @retval DRESULT: Operation result
+  */
+#if _USE_WRITE == 1
+
+DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
+{
+  DRESULT res = RES_ERROR;
+
+  if(BSP_SD_WriteBlocks((uint32_t*)buff,
+                        (uint32_t)(sector),
+                        count, SD_TIMEOUT) == MSD_OK)
+  {
+	/* wait until the Write operation is finished */
+    while(BSP_SD_GetCardState() != MSD_OK)
+    {
+    }
+    res = RES_OK;
+  }
+
+  return res;
+}
+#endif /* _USE_WRITE == 1 */
+
+/* USER CODE BEGIN beforeIoctlSection */
+/* can be used to modify previous code / undefine following code / add new code */
+/* USER CODE END beforeIoctlSection */
+/**
+  * @brief  I/O control operation
+  * @param  lun : not used
+  * @param  cmd: Control code
+  * @param  *buff: Buffer to send/receive control data
+  * @retval DRESULT: Operation result
+  */
+#if _USE_IOCTL == 1
+DRESULT SD_ioctl(BYTE lun, BYTE cmd, void *buff)
+{
+  DRESULT res = RES_ERROR;
+  BSP_SD_CardInfo CardInfo;
+
+  if (Stat & STA_NOINIT) return RES_NOTRDY;
+
+  switch (cmd)
+  {
+  /* Make sure that no pending write process */
+  case CTRL_SYNC :
+    res = RES_OK;
+    break;
+
+  /* Get number of sectors on the disk (DWORD) */
+  case GET_SECTOR_COUNT :
+    BSP_SD_GetCardInfo(&CardInfo);
+    *(DWORD*)buff = CardInfo.LogBlockNbr;
+    res = RES_OK;
+    break;
+
+  /* Get R/W sector size (WORD) */
+  case GET_SECTOR_SIZE :
+    BSP_SD_GetCardInfo(&CardInfo);
+    *(WORD*)buff = CardInfo.LogBlockSize;
+    res = RES_OK;
+    break;
+
+  /* Get erase block size in unit of sector (DWORD) */
+  case GET_BLOCK_SIZE :
+    BSP_SD_GetCardInfo(&CardInfo);
+    *(DWORD*)buff = CardInfo.LogBlockSize / SD_DEFAULT_BLOCK_SIZE;
+    res = RES_OK;
+    break;
+
+  default:
+    res = RES_PARERR;
+  }
+
+  return res;
+}
+#endif /* _USE_IOCTL == 1 */
+
+/* USER CODE BEGIN afterIoctlSection */
+/* can be used to modify previous code / undefine following code / add new code */
+/* USER CODE END afterIoctlSection */
+
+/* USER CODE BEGIN lastSection */
+/* can be used to modify / undefine previous code or add new code */
+/* USER CODE END lastSection */

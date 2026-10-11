@@ -15,7 +15,7 @@
 #include "atlas_build.h"
 #include "atlas_time.h"
 #include "atlas_usb.h"
-#include "bsp_driver_sd.h"
+#include "atlas_sd.h"
 
 #include <string.h>
 
@@ -351,7 +351,7 @@ bool AtlasBoard_GetBno085Sample(AtlasBoard *board,
 void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin)
 {
     if (gpio_pin == USB_VBUS_Pin) { AtlasUsb_OnVbusEdge(); return; }
-    if (gpio_pin == SD_DET_Pin) { BSP_SD_DetectFromISR(); return; }
+    if (gpio_pin == SD_DET_Pin) { AtlasSd_DetectFromISR(); return; }
     if (atlas_active_board == NULL)
     {
         return;

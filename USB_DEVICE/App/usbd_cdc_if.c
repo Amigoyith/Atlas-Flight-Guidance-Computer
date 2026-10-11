@@ -18,109 +18,240 @@
   */
 /* USER CODE END Header */
 
-/**
- * Atlas CDC adapter. Major functions:
- * - CDC_Init_FS()/DeInit_FS(): reset session and buffer state.
- * - CDC_Control_FS(): validated seven-byte line coding and DTR/RTS.
- * - CDC_Receive_FS(): retain RX before rearming the endpoint.
- * - CDC_Transmit_FS(): copy TX into private storage until the completion callback.
- */
+/* Includes ------------------------------------------------------------------*/
 #include "usbd_cdc_if.h"
-#include "atlas_usb.h"
-#include <string.h>
-#include <stdbool.h>
-extern USBD_HandleTypeDef hUsbDeviceFS;
-static uint8_t rx_buffer[CDC_DATA_FS_MAX_PACKET_SIZE];
-static uint8_t tx_buffer[ATLAS_USB_PACKET_CAPACITY];
-static uint8_t line_coding[7] = {0x00, 0xC2, 0x01, 0x00, 0, 0, 8}; /* 115200 8N1. */
 
-/** @brief Allocate no memory and initialize the class's retained buffers. @return USB result. */
+/* USER CODE BEGIN INCLUDE */
+#include "atlas_usb_cdc.h"
+/* USER CODE END INCLUDE */
+
+/* Private typedef -----------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
+/* Private macro -------------------------------------------------------------*/
+
+/* USER CODE BEGIN PV */
+/* Private variables ---------------------------------------------------------*/
+
+/* USER CODE END PV */
+
+/** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
+  * @brief Usb device library.
+  * @{
+  */
+
+/** @addtogroup USBD_CDC_IF
+  * @{
+  */
+
+/** @defgroup USBD_CDC_IF_Private_TypesDefinitions USBD_CDC_IF_Private_TypesDefinitions
+  * @brief Private types.
+  * @{
+  */
+
+/* USER CODE BEGIN PRIVATE_TYPES */
+
+/* USER CODE END PRIVATE_TYPES */
+
+/**
+  * @}
+  */
+
+/** @defgroup USBD_CDC_IF_Private_Defines USBD_CDC_IF_Private_Defines
+  * @brief Private defines.
+  * @{
+  */
+
+/* USER CODE BEGIN PRIVATE_DEFINES */
+/* USER CODE END PRIVATE_DEFINES */
+
+/**
+  * @}
+  */
+
+/** @defgroup USBD_CDC_IF_Private_Macros USBD_CDC_IF_Private_Macros
+  * @brief Private macros.
+  * @{
+  */
+
+/* USER CODE BEGIN PRIVATE_MACRO */
+
+/* USER CODE END PRIVATE_MACRO */
+
+/**
+  * @}
+  */
+
+/** @defgroup USBD_CDC_IF_Private_Variables USBD_CDC_IF_Private_Variables
+  * @brief Private variables.
+  * @{
+  */
+/* Create buffer for reception and transmission           */
+/* It's up to user to redefine and/or remove those define */
+/** Received data over USB are stored in this buffer      */
+uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+
+/** Data to send over USB CDC are stored in this buffer   */
+uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+
+/* USER CODE BEGIN PRIVATE_VARIABLES */
+
+/* USER CODE END PRIVATE_VARIABLES */
+
+/**
+  * @}
+  */
+
+/** @defgroup USBD_CDC_IF_Exported_Variables USBD_CDC_IF_Exported_Variables
+  * @brief Public variables.
+  * @{
+  */
+
+extern USBD_HandleTypeDef hUsbDeviceFS;
+
+/* USER CODE BEGIN EXPORTED_VARIABLES */
+
+/* USER CODE END EXPORTED_VARIABLES */
+
+/**
+  * @}
+  */
+
+/** @defgroup USBD_CDC_IF_Private_FunctionPrototypes USBD_CDC_IF_Private_FunctionPrototypes
+  * @brief Private functions declaration.
+  * @{
+  */
+
+static int8_t CDC_Init_FS(void);
+static int8_t CDC_DeInit_FS(void);
+static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length);
+static int8_t CDC_Receive_FS(uint8_t* pbuf, uint32_t *Len);
+static int8_t CDC_TransmitCplt_FS(uint8_t *pbuf, uint32_t *Len, uint8_t epnum);
+
+/* USER CODE BEGIN PRIVATE_FUNCTIONS_DECLARATION */
+
+/* USER CODE END PRIVATE_FUNCTIONS_DECLARATION */
+
+/**
+  * @}
+  */
+
+USBD_CDC_ItfTypeDef USBD_Interface_fops_FS =
+{
+  CDC_Init_FS,
+  CDC_DeInit_FS,
+  CDC_Control_FS,
+  CDC_Receive_FS,
+  CDC_TransmitCplt_FS
+};
+
+/* Private functions ---------------------------------------------------------*/
+/**
+  * @brief  Initializes the CDC media low layer over the FS USB IP
+  * @retval USBD_OK if all operations are OK else USBD_FAIL
+  */
 static int8_t CDC_Init_FS(void)
 {
-    if (USBD_CDC_SetTxBuffer(&hUsbDeviceFS, tx_buffer, 0U) != USBD_OK ||
-        USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rx_buffer) != USBD_OK) return USBD_FAIL;
-    AtlasUsb_OnClassState(true);
-    return USBD_OK;
+  /* USER CODE BEGIN 3 */
+  return AtlasUsbCdc_Init();
+  /* USER CODE END 3 */
 }
-/** @brief Invalidate all old-session work. @return USB result. */
+
+/**
+  * @brief  DeInitializes the CDC media low layer
+  * @retval USBD_OK if all operations are OK else USBD_FAIL
+  */
 static int8_t CDC_DeInit_FS(void)
 {
-    AtlasUsb_OnClassState(false);
-    return USBD_OK;
+  /* USER CODE BEGIN 4 */
+  return AtlasUsbCdc_DeInit();
+  /* USER CODE END 4 */
 }
-/** @brief Validate CDC requests; baud is metadata, never another UART's setting.
- * @param cmd Request. @param data Payload or setup structure for length zero.
- * @param length Payload size. @return USBD_FAIL requests an EP0 stall. */
-static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *data, uint16_t length)
+
+/**
+  * @brief  Manage the CDC class requests
+  * @param  cmd: Command code
+  * @param  pbuf: Buffer containing command data (request parameters)
+  * @param  length: Number of data to be sent (in bytes)
+  * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
+  */
+static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 {
-    if (data == NULL) return USBD_FAIL;
-    switch (cmd)
-    {
-        case CDC_SET_LINE_CODING:
-            if (length != 7U || data[4] > 2U || data[5] > 4U ||
-                !((data[6] >= 5U && data[6] <= 8U) || data[6] == 16U)) return USBD_FAIL;
-            memcpy(line_coding, data, sizeof(line_coding));
-            return USBD_OK;
-        case CDC_GET_LINE_CODING:
-            if (length != 7U) return USBD_FAIL;
-            memcpy(data, line_coding, sizeof(line_coding));
-            return USBD_OK;
-        case CDC_SET_CONTROL_LINE_STATE:
-            if (length != 0U) return USBD_FAIL;
-            AtlasUsb_OnControlLines(((USBD_SetupReqTypedef *)data)->wValue);
-            return USBD_OK;
-        case CDC_SEND_BREAK: /* Accepted as metadata; it does not drive a physical pin. */
-            return length == 0U ? USBD_OK : USBD_FAIL;
-        default: return USBD_FAIL;
-    }
+  /* USER CODE BEGIN 5 */
+  return AtlasUsbCdc_Control(cmd, pbuf, length);
+  /* USER CODE END 5 */
 }
-/** @brief Retain an OUT packet before allowing another. @param data Received bytes.
- * @param length Count pointer. @return USB result. */
-static int8_t CDC_Receive_FS(uint8_t *data, uint32_t *length)
+
+/**
+  * @brief  Data received over USB OUT endpoint are sent over CDC interface
+  *         through this function.
+  *
+  *         @note
+  *         This function will issue a NAK packet on any OUT packet received on
+  *         USB endpoint until exiting this function. If you exit this function
+  *         before transfer is complete on CDC interface (ie. using DMA controller)
+  *         it will result in receiving more data while previous ones are still
+  *         not sent.
+  *
+  * @param  Buf: Buffer of data to be received
+  * @param  Len: Number of data received (in bytes)
+  * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
+  */
+static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
-    if (data == NULL || length == NULL || *length > sizeof(rx_buffer)) return USBD_FAIL;
-    AtlasUsb_OnReceive(data, *length);
-    if (USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rx_buffer) != USBD_OK) return USBD_FAIL;
-    return (int8_t)USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+  /* USER CODE BEGIN 6 */
+  return AtlasUsbCdc_Receive(Buf, Len);
+  /* USER CODE END 6 */
 }
-/** @brief Safely query current class TX state. @return true only while configured and busy. */
-bool CDC_TransmitBusy_FS(void)
+
+/**
+  * @brief  CDC_Transmit_FS
+  *         Data to send over USB IN endpoint are sent over CDC interface
+  *         through this function.
+  *         @note
+  *
+  *
+  * @param  Buf: Buffer of data to be sent
+  * @param  Len: Number of data to be sent (in bytes)
+  * @retval USBD_OK if all operations are OK else USBD_FAIL or USBD_BUSY
+  */
+uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
 {
-    const USBD_CDC_HandleTypeDef *cdc = hUsbDeviceFS.pClassDataCmsit[hUsbDeviceFS.classId];
-    return hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED && cdc != NULL && cdc->TxState != 0U;
+  uint8_t result = USBD_OK;
+  /* USER CODE BEGIN 7 */
+  result = AtlasUsbCdc_Transmit(Buf, Len);
+  /* USER CODE END 7 */
+  return result;
 }
-/** @brief Copy and start a TX; caller bytes can be reused on return.
- * @param data Source. @param length 1-64 bytes. @return USB status.
- * @note The AtlasUsb owner calls this; endpoint lifetime is held in tx_buffer. */
-uint8_t CDC_Transmit_FS(uint8_t *data, uint16_t length)
+
+/**
+  * @brief  CDC_TransmitCplt_FS
+  *         Data transmitted callback
+  *
+  *         @note
+  *         This function is IN transfer complete callback used to inform user that
+  *         the submitted Data is successfully sent over USB.
+  *
+  * @param  Buf: Buffer of data to be received
+  * @param  Len: Number of data received (in bytes)
+  * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
+  */
+static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 {
-    const uint32_t mask = __get_PRIMASK();
-    uint8_t result = USBD_FAIL;
-    __disable_irq();
-    USBD_CDC_HandleTypeDef *cdc = hUsbDeviceFS.pClassDataCmsit[hUsbDeviceFS.classId];
-    if (data != NULL && length != 0U && length <= sizeof(tx_buffer) &&
-        hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED && cdc != NULL)
-    {
-        if (cdc->TxState != 0U) result = USBD_BUSY;
-        else
-        {
-            memcpy(tx_buffer, data, length);
-            result = USBD_CDC_SetTxBuffer(&hUsbDeviceFS, tx_buffer, length);
-            if (result == USBD_OK) result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
-        }
-    }
-    __DMB();
-    __set_PRIMASK(mask);
-    return result;
+  uint8_t result = USBD_OK;
+  /* USER CODE BEGIN 13 */
+  result = (uint8_t)AtlasUsbCdc_TransmitComplete(Buf, Len, epnum);
+  /* USER CODE END 13 */
+  return result;
 }
-/** @brief Record completion after the final data/ZLP handshake. @param data Retained buffer.
- * @param length Completed bytes. @param ep Endpoint. @return USB result. */
-static int8_t CDC_TransmitCplt_FS(uint8_t *data, uint32_t *length, uint8_t ep)
-{
-    (void)data; (void)ep;
-    if (length != NULL) AtlasUsb_OnTransmit(*length);
-    return USBD_OK;
-}
-USBD_CDC_ItfTypeDef USBD_Interface_fops_FS = {
-    CDC_Init_FS, CDC_DeInit_FS, CDC_Control_FS, CDC_Receive_FS, CDC_TransmitCplt_FS
-};
+
+/* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+
+/* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
+
+/**
+  * @}
+  */
+
+/**
+  * @}
+  */

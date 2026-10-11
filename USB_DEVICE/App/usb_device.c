@@ -18,32 +18,84 @@
   */
 /* USER CODE END Header */
 
-/**
- * Atlas USB library setup. Major functions:
- * - AtlasUsbDevice_Init(): initializes the library but DOES NOT connect the pull-up.
- * - MX_USB_DEVICE_Init(): compatibility setup wrapper; use AtlasUsb_Start() in applications.
- * The AtlasUsb task owns start/stop and gates connection using the PA9 VBUS divider.
- */
+/* Includes ------------------------------------------------------------------*/
+
 #include "usb_device.h"
 #include "usbd_core.h"
 #include "usbd_desc.h"
 #include "usbd_cdc.h"
 #include "usbd_cdc_if.h"
+
+/* USER CODE BEGIN Includes */
+
+/* USER CODE END Includes */
+
+/* USER CODE BEGIN PV */
+/* Private variables ---------------------------------------------------------*/
+
+/* USER CODE END PV */
+
+/* USER CODE BEGIN PFP */
+/* Private function prototypes -----------------------------------------------*/
+
+/* USER CODE END PFP */
+
+/* USB Device Core handle declaration. */
 USBD_HandleTypeDef hUsbDeviceFS;
 
-/** @brief Prepare CDC while disconnected; optional USB failure is nonfatal.
- * @return USB status; caller must tear down on error and separately gate USBD_Start. */
-uint8_t AtlasUsbDevice_Init(void)
-{
-    HAL_PWREx_EnableUSBVoltageDetector();
-    if (USBD_Init(&hUsbDeviceFS, &FS_Desc, DEVICE_FS) != USBD_OK ||
-        USBD_RegisterClass(&hUsbDeviceFS, &USBD_CDC) != USBD_OK ||
-        USBD_CDC_RegisterInterface(&hUsbDeviceFS, &USBD_Interface_fops_FS) != USBD_OK)
-        return USBD_FAIL;
-    return USBD_OK;
-}
-/** @brief Compatibility library setup only; ordinary boot uses the AtlasUsb owner. */
+/*
+ * -- Insert your variables declaration here --
+ */
+/* USER CODE BEGIN 0 */
+
+/* USER CODE END 0 */
+
+/*
+ * -- Insert your external function declaration here --
+ */
+/* USER CODE BEGIN 1 */
+
+/* USER CODE END 1 */
+
+/**
+  * Init USB device Library, add supported class and start the library
+  * @retval None
+  */
 void MX_USB_DEVICE_Init(void)
 {
-    (void)AtlasUsbDevice_Init();
+  /* USER CODE BEGIN USB_DEVICE_Init_PreTreatment */
+
+  /* USER CODE END USB_DEVICE_Init_PreTreatment */
+
+  /* Init Device Library, add supported class and start the library. */
+  if (USBD_Init(&hUsbDeviceFS, &FS_Desc, DEVICE_FS) != USBD_OK)
+  {
+    Error_Handler();
+  }
+  if (USBD_RegisterClass(&hUsbDeviceFS, &USBD_CDC) != USBD_OK)
+  {
+    Error_Handler();
+  }
+  if (USBD_CDC_RegisterInterface(&hUsbDeviceFS, &USBD_Interface_fops_FS) != USBD_OK)
+  {
+    Error_Handler();
+  }
+  if (USBD_Start(&hUsbDeviceFS) != USBD_OK)
+  {
+    Error_Handler();
+  }
+
+  /* USER CODE BEGIN USB_DEVICE_Init_PostTreatment */
+  HAL_PWREx_EnableUSBVoltageDetector();
+
+  /* USER CODE END USB_DEVICE_Init_PostTreatment */
 }
+
+/**
+  * @}
+  */
+
+/**
+  * @}
+  */
+

@@ -7,6 +7,7 @@
  */
 #include "usbd_core.h"
 #include "usbd_cdc_if.h"
+#include "atlas_usb_cdc.h"
 #include "atlas_usb.h"
 #include <assert.h>
 #include <stdio.h>
@@ -26,6 +27,9 @@ static bool stalled[256];
 void TestSetPrimask(uint32_t mask) { test_primask=mask; }
 void TestUsbDelay(uint32_t ms) { (void)ms; }
 void USBD_LL_Delay(uint32_t ms) { (void)ms; }
+/* Library setup (AtlasUsbDevice_Init) is linked but exercised by test_usb_owner.c. */
+USBD_DescriptorsTypeDef FS_Desc;
+void HAL_PWREx_EnableUSBVoltageDetector(void) {}
 void *USBD_static_malloc(uint32_t size)
 { assert(!allocated && size<=sizeof(allocation));allocated=true;return allocation.bytes; }
 void USBD_static_free(void *data) { assert(data==allocation.bytes && allocated);allocated=false; }
@@ -149,20 +153,20 @@ static void data_cases(void)
     assert(CDC_Transmit_FS(NULL,1U)==USBD_FAIL && CDC_Transmit_FS(source,0U)==USBD_FAIL);
     assert(CDC_Transmit_FS(source,65U)==USBD_FAIL);
     fail_transmit=true;
-    assert(CDC_Transmit_FS(source,1U)==USBD_FAIL && !CDC_TransmitBusy_FS());
+    assert(CDC_Transmit_FS(source,1U)==USBD_FAIL && !AtlasUsbCdc_TransmitBusy());
     fail_transmit=false;
-    assert(CDC_Transmit_FS(source,64U)==USBD_OK && CDC_TransmitBusy_FS());
+    assert(CDC_Transmit_FS(source,64U)==USBD_OK && AtlasUsbCdc_TransmitBusy());
     assert(tx_data[1]!=source && tx_length[1]==64U);
     memset(source,0xC3U,sizeof(source));assert(tx_data[1][0]==0x5AU);
     assert(CDC_Transmit_FS(source,1U)==USBD_BUSY && tx_data[1][0]==0x5AU);
     unsigned calls=tx_calls[1];
     assert(USBD_LL_DataInStage(&hUsbDeviceFS,1U,tx_data[1])==USBD_OK);
-    assert(CDC_TransmitBusy_FS() && completed==0U && tx_calls[1]==calls+1U && tx_length[1]==0U);
+    assert(AtlasUsbCdc_TransmitBusy() && completed==0U && tx_calls[1]==calls+1U && tx_length[1]==0U);
     assert(USBD_LL_DataInStage(&hUsbDeviceFS,1U,NULL)==USBD_OK);
-    assert(!CDC_TransmitBusy_FS() && completed==64U);
+    assert(!AtlasUsbCdc_TransmitBusy() && completed==64U);
     assert(CDC_Transmit_FS(source,3U)==USBD_OK);
     assert(USBD_LL_DataInStage(&hUsbDeviceFS,1U,tx_data[1])==USBD_OK);
-    assert(completed==67U && !CDC_TransmitBusy_FS());
+    assert(completed==67U && !AtlasUsbCdc_TransmitBusy());
 
     assert(rx_length[1]==64U);memcpy(rx_data[1],"ATLAS",5U);rx_actual[1]=5U;expect_rx_copy=true;
     assert(USBD_LL_DataOutStage(&hUsbDeviceFS,1U,rx_data[1])==USBD_OK);
@@ -171,7 +175,7 @@ static void data_cases(void)
     assert(CDC_Transmit_FS(source,7U)==USBD_OK);
     assert(USBD_LL_Reset(&hUsbDeviceFS)==USBD_OK);
     assert(!configured && !allocated && class_stops==1U);
-    assert(!CDC_TransmitBusy_FS() && CDC_Transmit_FS(source,1U)==USBD_FAIL);
+    assert(!AtlasUsbCdc_TransmitBusy() && CDC_Transmit_FS(source,1U)==USBD_FAIL);
     assert(completed==67U); /* Reset is not a delivery acknowledgement. */
 }
 /** @brief Run deterministic USB integration checks. @return Zero when all pass. */
@@ -179,7 +183,7 @@ int main(void)
 {
     USBD_DescriptorsTypeDef descriptors={0};
     uint8_t byte=0U;
-    assert(CDC_Transmit_FS(&byte,1U)==USBD_FAIL && !CDC_TransmitBusy_FS());
+    assert(CDC_Transmit_FS(&byte,1U)==USBD_FAIL && !AtlasUsbCdc_TransmitBusy());
     assert(USBD_Init(&hUsbDeviceFS,&descriptors,DEVICE_FS)==USBD_OK);
     assert(USBD_RegisterClass(&hUsbDeviceFS,&USBD_CDC)==USBD_OK);
     assert(USBD_CDC_RegisterInterface(&hUsbDeviceFS,&USBD_Interface_fops_FS)==USBD_OK);

@@ -18,6 +18,7 @@
 #include "atlas_io.h"
 #endif
 #include "fatfs.h"
+#include "atlas_sd.h"
 #include "FreeRTOS.h"
 #include "queue.h"
 #include "task.h"
@@ -138,7 +139,7 @@ uint32_t AtlasStorage_FatTime(void)
 static void storage_unmount(void)
 {
     (void)f_mount(NULL, SDPath, 0U);
-    SD_Invalidate();
+    AtlasSd_Invalidate();
     health.mounted = false;
 }
 
@@ -147,7 +148,7 @@ static FRESULT storage_mount(void)
 {
     storage_unmount();
     if (retSD != 0U) return FR_NOT_READY;
-    SD_PrepareMount();
+    AtlasSd_PrepareMount();
     FRESULT result = f_mount(&SDFatFS, SDPath, 1U);
     health.mounted = result == FR_OK;
     if (result != FR_OK) storage_unmount();
@@ -240,7 +241,7 @@ static FRESULT storage_stabilization_save(const AtlasStorageRequest *request,Atl
             }
         }
         if(fs==FR_OK) fs=storage_stabilization_read(&check);
-        if(fs==FR_OK && (memcmp(&config,&check,sizeof(config))!=0 || !BSP_SD_IsMediaCurrent() ||
+        if(fs==FR_OK && (memcmp(&config,&check,sizeof(config))!=0 || !AtlasSd_IsMediaCurrent() ||
                         !AtlasIo_StabilizationSaveCurrent(request->authorization,config.enabled!=0U))) fs=FR_INVALID_OBJECT;
         if(!was_mounted) storage_unmount();
     }
@@ -330,7 +331,7 @@ static void storage_task(void *argument)
 #endif
     for (;;)
     {
-        if (health.mounted && !BSP_SD_IsMediaCurrent())
+        if (health.mounted && !AtlasSd_IsMediaCurrent())
         {
             storage_unmount();
             health.last_status = ATLAS_ERROR_NOT_READY;
@@ -344,16 +345,16 @@ static void storage_task(void *argument)
             storage_execute(&item, &result);
             configASSERT(xQueueSend(results, &result, 0U) == pdTRUE);
         }
-        if (health.mounted && BSP_SD_GetCardState() == SD_TRANSFER_ERROR)
+        if (health.mounted && AtlasSd_GetCardState() == ATLAS_SD_TRANSFER_ERROR)
         {
             storage_unmount();
             health.last_status = ATLAS_ERROR_NOT_READY;
             ++health.errors;
         }
         (void)AtlasStorage_FatTime();
-        health.card_detected = BSP_SD_IsDetected() == SD_PRESENT;
-        BSP_SD_Diagnostics diagnostics;
-        BSP_SD_GetDiagnostics(&diagnostics);
+        health.card_detected = AtlasSd_IsDetected() == ATLAS_SD_PRESENT;
+        AtlasSdDiagnostics diagnostics;
+        AtlasSd_GetDiagnostics(&diagnostics);
         health.failure_stage = diagnostics.stage;
         health.hal_status = diagnostics.hal_status;
         health.hal_error = diagnostics.hal_error;
