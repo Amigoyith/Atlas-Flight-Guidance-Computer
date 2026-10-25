@@ -1,0 +1,3 @@
+[submodule "ThirdParty/Fusion"]
+	path = ThirdParty/Fusion
+	url = https://github.com/xioTechnologies/Fusion

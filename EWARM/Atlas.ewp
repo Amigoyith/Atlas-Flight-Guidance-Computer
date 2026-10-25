@@ -355,6 +355,7 @@
           <name>CCIncludePath2</name>
           <state>$PROJ_DIR$/../App/Inc</state>
           <state>$PROJ_DIR$/../ThirdParty/CEVA/sh2</state>
+          <state>$PROJ_DIR$/../ThirdParty/Fusion/Fusion</state>
           <state>$PROJ_DIR$/../ThirdParty/FreeRTOS-Kernel/include</state>
           <state>$PROJ_DIR$/../ThirdParty/FreeRTOS-Kernel/portable/IAR/ARM_CM7/r0p1</state>
           <state>$PROJ_DIR$/../Core/Inc</state>
@@ -1185,6 +1186,10 @@
       <file><name>$PROJ_DIR$/../ThirdParty/CEVA/sh2/sh2_SensorValue.c</name></file>
       <file><name>$PROJ_DIR$/../ThirdParty/CEVA/sh2/sh2_util.c</name></file>
       <file><name>$PROJ_DIR$/../ThirdParty/CEVA/sh2/shtp.c</name></file>
+    </group>
+    <group>
+      <name>Fusion AHRS</name>
+      <file><name>$PROJ_DIR$/../ThirdParty/Fusion/Fusion/FusionAhrs.c</name></file>
     </group>
     <group>
       <name>FreeRTOS Kernel</name>

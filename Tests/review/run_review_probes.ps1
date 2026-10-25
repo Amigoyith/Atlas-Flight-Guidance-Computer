@@ -24,6 +24,7 @@ try {
         '-I', (Join-Path $reviewRoot 'Tests/review/mocks'),
         '-I', (Join-Path $reviewRoot 'Tests/host/mocks'),
         '-I', (Join-Path $reviewRoot 'App/Inc'),
+        '-I', (Join-Path $reviewRoot 'ThirdParty/Fusion/Fusion'),
         '-I', (Join-Path $reviewRoot 'FATFS/Target'),
         '-I', (Join-Path $reviewRoot 'Middlewares/Third_Party/FatFs/src')
     )

@@ -15,6 +15,14 @@ _Static_assert(sizeof(AtlasStabilizationConfig) == ATLAS_STAB_CONFIG_BYTES, "SD 
 _Static_assert(offsetof(AtlasStabilizationConfig, crc) == 60U, "SD record layout");
 #define STAB_MAGIC UINT32_C(0x41535442)
 #define RAD_PER_DEG 0.01745329251994329577f
+/* Nominal LSM6DSV16B rate (240 Hz); the true period is set per update. Gain 2/s
+ * is a 0.5 s accelerometer time constant. Acceleration beyond 10 degrees of
+ * disagreement is ignored for up to 5 s, then the accelerometer is trusted again. */
+#define STAB_AHRS_RATE_HZ 240.0f
+#define STAB_AHRS_GAIN 2.0f
+#define STAB_AHRS_REJECT_DEG 10.0f
+#define STAB_AHRS_TIMEOUT_S 5.0f
+#define STAB_AHRS_MAG_REJECT_DEG 20.0f /* Looser than tilt: hard-iron error is common. */
 
 /** @brief Vector dot product. @param a First. @param b Second. @return Scalar. */
 static float stab_dot(const float a[3], const float b[3])
@@ -61,12 +69,122 @@ bool AtlasStabilization_ConfigValid(const AtlasStabilizationConfig *c)
     const float n=stab_norm(c->upright);
     return n>0.99f && n<1.01f && c->upright[1]<-0.85f && fabsf(c->upright[2])<0.35f;
 }
+/** @brief Publish the AHRS up direction (sensor axes, the direction the accelerometer reads at rest).
+ * @param s State. @return False if the result is not finite, so the estimator can fault. */
+static bool stab_ahrs_up(AtlasStabilization *s)
+{
+    const FusionVector g=FusionAhrsGetGravity(&s->ahrs);
+    s->up[0]=g.axis.x; s->up[1]=g.axis.y; s->up[2]=g.axis.z;
+    return stab_unit(s->up);
+}
+/** @brief Heading of ATLAS_STAB_HEADING_AXIS, clockwise from magnetic north (Fusion is NWU).
+ * R maps sensor to earth, so column k holds that axis in (north, west, up).
+ * @param s State. @return False when the axis is too close to vertical to define a heading. */
+static bool stab_heading(AtlasStabilization *s)
+{
+    const FusionMatrix r=FusionQuaternionToMatrix(FusionAhrsGetQuaternion(&s->ahrs));
+    const float north=r.array[ATLAS_STAB_HEADING_AXIS], west=r.array[3U+ATLAS_STAB_HEADING_AXIS];
+    if(!isfinite(north) || !isfinite(west) || hypotf(north,west)<ATLAS_STAB_HEADING_MIN_HORIZONTAL) return false;
+    float h=atan2f(-west,north)/RAD_PER_DEG;
+    if(h<0.0f) h+=360.0f;
+    s->heading_deg=h>=360.0f?0.0f:h;
+    return true;
+}
+/** @brief Latch Fusion's flags, rejection internals and heading for diagnostics. @param s State.
+ * @param mag_used True if a magnetometer sample was fed to this step. */
+static void stab_ahrs_flags(AtlasStabilization *s,bool mag_used)
+{
+    const FusionAhrsFlags f=FusionAhrsGetFlags(&s->ahrs);
+    const FusionAhrsInternalStates i=FusionAhrsGetInternalStates(&s->ahrs);
+    s->accel_error_deg=i.accelerationError; s->accel_trigger=i.accelerationRecoveryTrigger;
+    s->mag_error_deg=i.magneticError; s->mag_trigger=i.magneticRecoveryTrigger;
+    /* Lock once Fusion accepts the field and agrees with it; lose it if the field goes away before launch.
+     * After launch the gyro coasts the heading, so the lock is kept (the LAUNCHED flag says so). */
+    if(mag_used && !f.startup && !i.magnetometerIgnored && i.magneticError<ATLAS_STAB_MAG_LOCK_DEG) s->mag_locked=true;
+    else if(!s->launched && (int32_t)(s->timestamp_ms-s->mag_ms)>(int32_t)(ATLAS_STAB_MAG_MAX_AGE_MS*4U)) s->mag_locked=false;
+    const bool heading_ok=stab_heading(s);
+    s->flags=(s->launched?ATLAS_STAB_FLAG_LAUNCHED:0U)|(f.startup?ATLAS_STAB_FLAG_STARTUP:0U)|
+        (i.accelerometerIgnored?ATLAS_STAB_FLAG_ACCEL_IGNORED:0U)|
+        (f.accelerationRecovery?ATLAS_STAB_FLAG_ACCEL_RECOVERY:0U)|
+        (f.overrangeRecovery?ATLAS_STAB_FLAG_OVERRANGE_RECOVERY:0U)|
+        ((!mag_used||i.magnetometerIgnored)?ATLAS_STAB_FLAG_MAG_IGNORED:0U)|
+        (f.magneticRecovery?ATLAS_STAB_FLAG_MAG_RECOVERY:0U)|
+        ((s->mag_locked&&heading_ok)?ATLAS_STAB_FLAG_HEADING_VALID:0U);
+}
+/** @brief Condition the optional magnetometer: freshness, finiteness, hard-iron offset, axis map, plausible
+ * magnitude. @param s State. @param sample Input. @param m Output in IMU axes (gauss).
+ * @return True if usable this step. */
+static bool stab_mag(AtlasStabilization *s,const AtlasStabilizationSample *sample,float m[3])
+{
+    static const float map[9]=ATLAS_STAB_MAG_TO_IMU, offset[3]=ATLAS_STAB_MAG_OFFSET_GAUSS;
+    if(!ATLAS_STAB_USE_MAGNETOMETER) return false;
+    if(!s->mag_in_valid || (int32_t)(sample->timestamp_ms-s->mag_in_ms)>(int32_t)ATLAS_STAB_MAG_MAX_AGE_MS ||
+       (int32_t)(sample->timestamp_ms-s->mag_in_ms)<-(int32_t)ATLAS_STAB_MAG_MAX_AGE_MS) return false;
+    float raw[3];
+    for(unsigned i=0;i<3U;++i)
+    { raw[i]=s->mag_in[i]-offset[i]; if(!isfinite(raw[i])) return false; }
+    for(unsigned r=0;r<3U;++r) m[r]=map[3U*r]*raw[0]+map[3U*r+1U]*raw[1]+map[3U*r+2U]*raw[2];
+    const float n=stab_norm(m);
+    if(!isfinite(n) || n<ATLAS_STAB_MAG_MIN_GAUSS || n>ATLAS_STAB_MAG_MAX_GAUSS) return false;
+    s->mag_ms=s->mag_in_ms;
+    return true;
+}
+/** @brief Advance the AHRS by one measured interval. @param s State. @param w Bias-corrected gyro (dps).
+ * @param a Accelerometer (g) or NULL to ignore it. @param m Magnetometer (IMU axes) or NULL.
+ * @param dt Elapsed seconds. */
+static void stab_ahrs_step(AtlasStabilization *s,const float w[3],const float a[3],const float m[3],float dt)
+{
+    const FusionVector gyro={.array={w[0],w[1],w[2]}};
+    const FusionVector accel=a?(FusionVector){.array={a[0],a[1],a[2]}}:FUSION_VECTOR_ZERO;
+    const FusionVector mag=m?(FusionVector){.array={m[0],m[1],m[2]}}:FUSION_VECTOR_ZERO;
+    FusionAhrsSetSamplePeriod(&s->ahrs,dt);
+    FusionAhrsUpdate(&s->ahrs,gyro,accel,mag);
+    stab_ahrs_flags(s,m!=NULL);
+}
+/** @brief Start the Fusion AHRS at the measured up direction, skipping its convergence ramp.
+ * @param s State. @param a Accelerometer (g). @param an Its norm, already range checked.
+ * @param have_mag True keeps Fusion's startup ramp, which ignores rejection while heading locks to the field. */
+static void stab_ahrs_start(AtlasStabilization *s,const float a[3],float an,bool have_mag)
+{
+    FusionAhrsSettings settings=fusionAhrsDefaultSettings;
+    settings.sampleRate=STAB_AHRS_RATE_HZ; settings.gain=STAB_AHRS_GAIN;
+    settings.accelerationRejection=STAB_AHRS_REJECT_DEG; settings.magneticRejection=STAB_AHRS_MAG_REJECT_DEG; settings.rejectionTimeout=STAB_AHRS_TIMEOUT_S;
+    FusionAhrsInitialise(&s->ahrs); FusionAhrsSetSettings(&s->ahrs,&settings);
+    /* Third row of the attitude matrix is the up direction in sensor axes, so
+     * q=(w,x,y,0) with w=sqrt((1+uz)/2), x=uy/2w, y=-ux/2w reproduces u exactly. */
+    const float ux=a[0]/an,uy=a[1]/an,uz=a[2]/an;
+    FusionQuaternion q={.element={0.0f,1.0f,0.0f,0.0f}}; /* 180 degrees about X: u=-Z. */
+    if(uz>-0.999f)
+    {
+        const float w=sqrtf(0.5f*(1.0f+uz));
+        q.element.w=w; q.element.x=uy/(2.0f*w); q.element.y=-ux/(2.0f*w); q.element.z=0.0f;
+    }
+    FusionAhrsSetQuaternion(&s->ahrs,FusionQuaternionNormalise(q));
+    if(!have_mag) FusionAhrsSkipStartup(&s->ahrs);
+    s->mag_locked=false; s->mag_ms=0U; s->heading_deg=0.0f;
+    stab_ahrs_flags(s,false);
+    (void)stab_ahrs_up(s);
+}
+void AtlasStabilization_SetMagnetometer(AtlasStabilization *s, const AtlasStabilizationMagnetometer *m)
+{
+    s->mag_in_valid=m && m->valid;
+    if(!s->mag_in_valid) return;
+    memcpy(s->mag_in,m->gauss,sizeof(s->mag_in)); s->mag_in_ms=m->timestamp_ms;
+}
+bool AtlasStabilization_Launch(AtlasStabilization *s)
+{
+    if(!s->initialized) return false;
+    s->launched=true; s->ready=true; s->fault=ATLAS_STAB_FAULT_NONE; s->still_count=0U;
+    s->flags|=ATLAS_STAB_FLAG_LAUNCHED|ATLAS_STAB_FLAG_ACCEL_IGNORED|ATLAS_STAB_FLAG_MAG_IGNORED;
+    return true;
+}
 /** @brief Fuse one new sample and enforce independent freshness. @param s State.
  * @param sample Sensor input. @param c Optional bias. @param now Current tick. */
 void AtlasStabilization_Update(AtlasStabilization *s, const AtlasStabilizationSample *sample,
                                const AtlasStabilizationConfig *c, uint32_t now)
 {
-    if (!sample->valid || (uint32_t)(now-sample->timestamp_ms)>ATLAS_STAB_SAMPLE_MAX_MS)
+    if (s->launched && !sample->valid) { s->fault=ATLAS_STAB_FAULT_SAMPLE; return; } /* Coast; never restart. */
+    if (!s->launched && (!sample->valid || (uint32_t)(now-sample->timestamp_ms)>ATLAS_STAB_SAMPLE_MAX_MS))
     {
         s->fault=sample->valid?ATLAS_STAB_FAULT_STALE:ATLAS_STAB_FAULT_SAMPLE;
         s->initialized=s->ready=false; s->still_count=0U; return;
@@ -80,6 +198,23 @@ void AtlasStabilization_Update(AtlasStabilization *s, const AtlasStabilizationSa
         w[i]=sample->gyro_dps[i]-(c ? c->bias_dps[i] : 0.0f);
     }
     const float an=stab_norm(a), wn=stab_norm(w);
+    /* Boost: a sustained high-g reading latches launch. From then on gravity is
+     * unobservable, so attitude coasts on the gyro alone and no accelerometer, rate-limit
+     * or sample-gap check may restart it from a (meaningless) acceleration vector. */
+    if (s->initialized && !s->launched && isfinite(an) && isfinite(wn))
+    {
+        s->launch_count = (an>=ATLAS_STAB_LAUNCH_G) ? s->launch_count+1U : 0U;
+        if (s->launch_count>=ATLAS_STAB_LAUNCH_SAMPLES) (void)AtlasStabilization_Launch(s);
+    }
+    /* Candidate boost samples coast too, so the estimator is not reset before the latch. */
+    if (s->launched || (s->initialized && s->launch_count>0U))
+    {
+        if (!isfinite(wn)) { s->fault=ATLAS_STAB_FAULT_NONFINITE; return; }
+        stab_ahrs_step(s,w,NULL,NULL,(float)elapsed*0.001f);
+        if (!stab_ahrs_up(s)) { s->fault=ATLAS_STAB_FAULT_VECTOR; return; }
+        s->timestamp_ms=sample->timestamp_ms; s->ready=true; s->fault=ATLAS_STAB_FAULT_NONE;
+        return;
+    }
     if (!isfinite(an) || !isfinite(wn) || wn>500.0f || an<0.1f || an>2.0f)
     {
         s->fault=(!isfinite(an)||!isfinite(wn))?ATLAS_STAB_FAULT_NONFINITE:
@@ -91,32 +226,22 @@ void AtlasStabilization_Update(AtlasStabilization *s, const AtlasStabilizationSa
     {
         s->initialized=s->ready=false; s->still_count=0U;
         if (!accel_good) { s->fault=ATLAS_STAB_FAULT_CORRECTION; return; }
-        for(unsigned i=0;i<3U;++i) s->up[i]=a[i]/an;
+        float m0[3];
+        const bool have_mag=stab_mag(s,sample,m0);
+        stab_ahrs_start(s,a,an,have_mag);
+        if(have_mag) s->mag_ms=s->mag_in_ms;
         s->settled_ms=sample->timestamp_ms;
         s->accel_ms=sample->timestamp_ms;
         s->initialized=true;
     }
     else
     {
-        const float dt=(float)elapsed*0.001f;
-        /* A fixed world vector in rotating sensor coordinates obeys u'=-w x u.
-         * Rodrigues avoids an Euler integration norm/angle error at higher rates. */
-        const float angle=wn*RAD_PER_DEG*dt;
-        if(wn>0.0001f)
-        {
-            float axis[3],cross[3];
-            for(unsigned i=0;i<3U;++i) axis[i]=w[i]/wn;
-            stab_cross(axis,s->up,cross);
-            const float dot=stab_dot(axis,s->up),co=cosf(angle),si=sinf(angle);
-            for(unsigned i=0;i<3U;++i) s->up[i]=co*s->up[i]-si*cross[i]+(1.0f-co)*dot*axis[i];
-        }
-        if(accel_good)
-        {
-            const float blend=dt/(0.5f+dt);
-            for(unsigned i=0;i<3U;++i) s->up[i]+=(a[i]/an-s->up[i])*blend;
-            s->accel_ms=sample->timestamp_ms;
-        }
-        if(!stab_unit(s->up)) { s->fault=ATLAS_STAB_FAULT_VECTOR; s->initialized=s->ready=false; return; }
+        /* Fusion integrates the gyro and feeds back only an in-range accelerometer.
+         * A zero vector tells it to coast on the gyro alone. */
+        float m[3];
+        stab_ahrs_step(s,w,accel_good?a:NULL,stab_mag(s,sample,m)?m:NULL,(float)elapsed*0.001f);
+        if(accel_good) s->accel_ms=sample->timestamp_ms;
+        if(!stab_ahrs_up(s)) { s->fault=ATLAS_STAB_FAULT_VECTOR; s->initialized=s->ready=false; return; }
     }
     s->timestamp_ms=sample->timestamp_ms;
     s->ready=(uint32_t)(s->timestamp_ms-s->settled_ms)>=250U &&

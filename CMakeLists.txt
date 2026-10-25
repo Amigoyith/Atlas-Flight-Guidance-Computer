@@ -25,6 +25,7 @@ set(CMAKE_PROJECT_NAME Atlas)
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 option(ATLAS_BRINGUP "Build the non-actuating PCB diagnostic application" OFF)
 option(ATLAS_SERVO_BENCH "Allow bounded, explicitly enabled servo tests (pyro inhibited)" OFF)
+option(ATLAS_STAB_USE_MAGNETOMETER "Feed the MMC5983MA to the stabilization estimator for pre-launch heading (axis map and hard-iron offset must be verified first)" OFF)
 if(ATLAS_SERVO_BENCH AND NOT ATLAS_BRINGUP)
     message(FATAL_ERROR "ServoBench requires ATLAS_BRINGUP=ON")
 endif()
@@ -83,6 +84,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ThirdParty/CEVA/sh2/sh2_SensorValue.c
     ThirdParty/CEVA/sh2/sh2_util.c
     ThirdParty/CEVA/sh2/shtp.c
+    ThirdParty/Fusion/Fusion/FusionAhrs.c
     ThirdParty/FreeRTOS-Kernel/list.c
     ThirdParty/FreeRTOS-Kernel/queue.c
     ThirdParty/FreeRTOS-Kernel/stream_buffer.c
@@ -94,6 +96,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/Inc
     ThirdParty/CEVA/sh2
+    ThirdParty/Fusion/Fusion
     ThirdParty/FreeRTOS-Kernel/include
     ThirdParty/FreeRTOS-Kernel/portable/GCC/ARM_CM7/r0p1
 )
@@ -103,6 +106,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     ATLAS_USE_FREERTOS=1
     ATLAS_BRINGUP=$<BOOL:${ATLAS_BRINGUP}>
     ATLAS_SERVO_BENCH=$<BOOL:${ATLAS_SERVO_BENCH}>
+    ATLAS_STAB_USE_MAGNETOMETER=$<BOOL:${ATLAS_STAB_USE_MAGNETOMETER}>
 )
 
 if(ATLAS_SERVO_BENCH)

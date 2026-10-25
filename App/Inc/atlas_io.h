@@ -145,6 +145,8 @@ void AtlasIo_BenchServoStop(void);
 void AtlasIo_BenchUsbLost(void);
 /** @brief Copy a new IMU sample from its sole sensor owner. @param sample Value to copy. */
 void AtlasIo_StabilizationSample(const AtlasStabilizationSample *sample);
+/** @brief Copy the latest optional magnetometer reading for heading. @param mag Input. */
+void AtlasIo_StabilizationMagnetometer(const AtlasStabilizationMagnetometer *mag);
 /** @brief Prepare a deliberate SD setting change with PWM stopped. @param operation
  * 0 off, 1 on, 2 upright calibration, 3 direction mask. @param reverse Four bits.
  * @param config Prepared record. @param token Cancellation epoch. @return Status. */

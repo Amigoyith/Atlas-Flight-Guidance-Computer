@@ -98,6 +98,158 @@ static void estimator(void)
     assert(!s.ready && s.fault==ATLAS_STAB_FAULT_CORRECTION);
     puts("PASS stabilization estimator: stationary bias, wrap, duplicate/stale/NaN rejection, signed gyro rotation and moving calibration rejection; all 64 record bytes CRC-covered");
 }
+/* The Fusion AHRS must start exactly at the measured up vector for every orientation
+ * (including the 180-degree branch) and, gyro-only, follow the independent u'=-w x u law. */
+static void fusion_attitude(void)
+{
+    for(int el=-90;el<=90;el+=15) for(int az=0;az<360;az+=20)
+    {
+        const float e=(float)el*PI/180.0f,a=(float)az*PI/180.0f;
+        float u[3]={cosf(e)*cosf(a),cosf(e)*sinf(a),sinf(e)};
+        if(el==-90) u[0]=u[1]=0.0f;
+        AtlasStabilization s={0};AtlasStabilizationSample sample={{u[0],u[1],u[2]},{0,0,0},1000,true};
+        AtlasStabilization_Update(&s,&sample,NULL,sample.timestamp_ms);
+        assert(s.initialized);
+        for(unsigned i=0;i<3;++i) assert(fabsf(s.up[i]-u[i])<2e-3f);
+    }
+    AtlasStabilization s={0};AtlasStabilizationSample sample={{0.6f,-0.8f,0},{0,0,0},1000,true};
+    AtlasStabilization_Update(&s,&sample,NULL,1000);
+    float truth[3]={0.6f,-0.8f,0};const float w[3]={20,-35,50};
+    sample.accel_g[0]=1.3f; /* out of the 0.85-1.15 g feedback window, still a legal sample */
+    memcpy(sample.gyro_dps,w,sizeof(w));
+    for(unsigned i=0;i<150;++i)
+    {
+        sample.timestamp_ms+=4U+(i&1U); /* 240 Hz jitter */
+        const float dt=(float)(4U+(i&1U))*0.001f,wn=sqrtf(w[0]*w[0]+w[1]*w[1]+w[2]*w[2]);
+        const float ang=wn*PI/180.0f*dt,ax[3]={w[0]/wn,w[1]/wn,w[2]/wn};
+        const float cr[3]={ax[1]*truth[2]-ax[2]*truth[1],ax[2]*truth[0]-ax[0]*truth[2],ax[0]*truth[1]-ax[1]*truth[0]};
+        const float dot=ax[0]*truth[0]+ax[1]*truth[1]+ax[2]*truth[2];
+        for(unsigned k=0;k<3;++k) truth[k]=cosf(ang)*truth[k]-sinf(ang)*cr[k]+(1.0f-cosf(ang))*dot*ax[k];
+        AtlasStabilization_Update(&s,&sample,NULL,sample.timestamp_ms);
+    }
+    for(unsigned k=0;k<3;++k) assert(fabsf(s.up[k]-truth[k])<0.01f);
+    {   /* Flags: at rest the accelerometer is used; a sustained 40-degree disagreement
+         * is rejected, trips acceleration recovery once the trigger reaches 1.0, then re-admits it. */
+        AtlasStabilization f={0};AtlasStabilizationSample r={{0,-1,0},{0,0,0},1000,true};
+        for(unsigned i=0;i<20;++i){r.timestamp_ms+=4;AtlasStabilization_Update(&f,&r,NULL,r.timestamp_ms);}
+        assert(!(f.flags&(ATLAS_STAB_FLAG_ACCEL_IGNORED|ATLAS_STAB_FLAG_LAUNCHED|ATLAS_STAB_FLAG_STARTUP)) && f.accel_trigger==0.0f);
+        r.accel_g[0]=0.64f;r.accel_g[1]=-0.77f; /* ~40 degrees off, in the 0.85-1.15 g window */
+        r.timestamp_ms+=4;AtlasStabilization_Update(&f,&r,NULL,r.timestamp_ms);
+        assert((f.flags&ATLAS_STAB_FLAG_ACCEL_IGNORED) && f.accel_error_deg>30.0f && f.accel_trigger>0.0f && f.accel_trigger<1.0f);
+        bool recovered=false;
+        for(unsigned i=0;i<2400 && !recovered;++i){r.timestamp_ms+=4;AtlasStabilization_Update(&f,&r,NULL,r.timestamp_ms);recovered=f.flags&ATLAS_STAB_FLAG_ACCEL_RECOVERY;}
+        assert(recovered && f.accel_trigger>=1.0f);
+    }
+    puts("PASS stabilization Fusion attitude: exact start over 234 orientations; 240 Hz jittered gyro-only rotation matches Rodrigues");
+}
+/* After launch the accelerometer is ignored: boost acceleration, a gap and a flipped
+ * accelerometer must not move the gyro-only attitude away from the Rodrigues truth. */
+static void launch_coast(void)
+{
+    AtlasStabilization s={0};AtlasStabilizationSample sample={{0,-1,0},{0,0,0},1000,true};
+    for(unsigned i=0;i<60;++i){sample.timestamp_ms+=5;AtlasStabilization_Update(&s,&sample,NULL,sample.timestamp_ms);}
+    assert(s.ready && !s.launched);
+    sample.accel_g[1]=-2.5f;sample.timestamp_ms+=5;AtlasStabilization_Update(&s,&sample,NULL,sample.timestamp_ms);
+    assert(!s.launched && s.fault==ATLAS_STAB_FAULT_ACCEL); /* below launch threshold: legacy reset */
+    for(unsigned i=0;i<60;++i){sample.accel_g[1]=-1;sample.timestamp_ms+=5;AtlasStabilization_Update(&s,&sample,NULL,sample.timestamp_ms);}
+    assert(s.ready);
+    float truth[3]={0,-1,0};const float w[3]={0,0,90};
+    sample.gyro_dps[2]=w[2];
+    for(unsigned i=0;i<120;++i)
+    {
+        sample.accel_g[0]=5.0f;sample.accel_g[1]=-8.0f;sample.accel_g[2]=2.0f; /* boost: ~9.6 g, wrong direction */
+        sample.timestamp_ms+=5;if(i==60)sample.timestamp_ms+=300; /* sample gap > 100 ms */
+        const float dt=(i==60?305.0f:5.0f)*0.001f,ang=w[2]*PI/180.0f*dt;
+        const float x=truth[0],y=truth[1];
+        truth[0]=cosf(ang)*x+sinf(ang)*y;truth[1]=-sinf(ang)*x+cosf(ang)*y; /* u' = -w x u about +Z */
+        AtlasStabilization_Update(&s,&sample,NULL,sample.timestamp_ms);
+        if(i>=2)assert(s.launched && s.ready && s.fault==ATLAS_STAB_FAULT_NONE);
+    }
+    for(unsigned k=0;k<3;++k) assert(fabsf(s.up[k]-truth[k])<0.01f);
+    sample.valid=false;AtlasStabilization_Update(&s,&sample,NULL,sample.timestamp_ms);
+    assert(s.launched && s.initialized); /* invalid sample never restarts from the accelerometer */
+    assert(s.flags&ATLAS_STAB_FLAG_LAUNCHED && s.flags&ATLAS_STAB_FLAG_ACCEL_IGNORED && !(s.flags&ATLAS_STAB_FLAG_STARTUP));
+    AtlasStabilization n={0};assert(!AtlasStabilization_Launch(&n));
+    puts("PASS stabilization launch: 3-sample high-g latch, accelerometer ignored in boost, gap and invalid samples, gyro-only attitude matches truth");
+}
+/* Independent truth for heading: build the sensor frame in NWU earth coordinates from a chosen heading of the
+ * +Z axis (clockwise from north) and a nose-down-free upright board (up = -Y), then express gravity and an
+ * Earth field of 0.2 G north / 0.4 G down in that frame. */
+static void mag_frame(float heading_deg,float up_s[3],float mag_s[3])
+{
+    const float h=heading_deg*PI/180.0f;
+    const float z[3]={cosf(h),-sinf(h),0},y[3]={0,0,-1};
+    const float x[3]={y[1]*z[2]-y[2]*z[1],y[2]*z[0]-y[0]*z[2],y[0]*z[1]-y[1]*z[0]};
+    const float* axis[3]={x,y,z},field[3]={0.2f,0,-0.4f};
+    for(unsigned k=0;k<3;++k){up_s[k]=axis[k][2];mag_s[k]=axis[k][0]*field[0]+axis[k][1]*field[1]+axis[k][2]*field[2];}
+}
+#if !ATLAS_STAB_USE_MAGNETOMETER
+/* Default build: a perfect field is supplied and must be ignored. Up is unchanged, heading is never
+ * referenced to north, Fusion's startup ramp is skipped, and the flags say why. */
+static void magnetometer(void)
+{
+    float u[3],m[3];mag_frame(90,u,m);
+    AtlasStabilization s={0};AtlasStabilizationSample x={{u[0],u[1],u[2]},{0,0,0},1000,true};
+    AtlasStabilizationMagnetometer g={{m[0],m[1],m[2]},1000,true};
+    for(unsigned i=0;i<1500;++i)
+    {   x.timestamp_ms+=4;g.timestamp_ms=x.timestamp_ms;AtlasStabilization_SetMagnetometer(&s,&g);AtlasStabilization_Update(&s,&x,NULL,x.timestamp_ms);
+        assert(!(s.flags&ATLAS_STAB_FLAG_STARTUP) && (s.flags&ATLAS_STAB_FLAG_MAG_IGNORED));
+        assert(!(s.flags&ATLAS_STAB_FLAG_HEADING_VALID) && !s.mag_locked && s.mag_trigger==0.0f && s.mag_error_deg==0.0f);}
+    assert(fabsf(s.up[1]+1.0f)<0.001f);
+    puts("PASS stabilization magnetometer disabled (default): field ignored, no heading lock, startup skipped, up unchanged");
+}
+#else
+static float angle_diff(float a,float b){float d=fmodf(a-b+540.0f,360.0f)-180.0f;return fabsf(d);}
+static void magnetometer(void)
+{
+    const float headings[]={0,45,90,200,333};
+    for(unsigned n=0;n<5;++n)
+    {
+        float u[3],m[3];mag_frame(headings[n],u,m);
+        AtlasStabilization s={0};
+        AtlasStabilizationSample x={{u[0],u[1],u[2]},{0,0,0},1000,true};
+        AtlasStabilizationMagnetometer g={{m[0],m[1],m[2]},1000,true};
+        for(unsigned i=0;i<1500;++i)
+        {   x.timestamp_ms+=4;if(i%25==0){g.timestamp_ms=x.timestamp_ms;AtlasStabilization_SetMagnetometer(&s,&g);} /* 240 Hz IMU, ~10 Hz field */
+            AtlasStabilization_Update(&s,&x,NULL,x.timestamp_ms);}
+        assert(s.flags&ATLAS_STAB_FLAG_HEADING_VALID && s.mag_locked && !(s.flags&ATLAS_STAB_FLAG_STARTUP));
+        assert(angle_diff(s.heading_deg,headings[n])<1.0f);
+        assert(fabsf(s.up[1]+1.0f)<0.01f); /* Heading feedback must not move gravity. */
+    }
+    /* Wrong-magnitude and stale/absent fields are rejected and flagged; heading is not referenced. */
+    float u[3],m[3];mag_frame(90,u,m);
+    AtlasStabilization s={0};AtlasStabilizationSample x={{u[0],u[1],u[2]},{0,0,0},1000,true};
+    AtlasStabilizationMagnetometer g={{m[0]*5,m[1]*5,m[2]*5},1000,true};
+    for(unsigned i=0;i<500;++i){x.timestamp_ms+=4;g.timestamp_ms=x.timestamp_ms;AtlasStabilization_SetMagnetometer(&s,&g);AtlasStabilization_Update(&s,&x,NULL,x.timestamp_ms);}
+    assert((s.flags&ATLAS_STAB_FLAG_MAG_IGNORED) && !(s.flags&ATLAS_STAB_FLAG_HEADING_VALID) && !s.mag_locked);
+    /* A 90-degree wrong field is rejected once lock and startup are over; recovery re-admits it after the timeout. */
+    mag_frame(90,u,m);memset(&s,0,sizeof(s));
+    x=(AtlasStabilizationSample){{u[0],u[1],u[2]},{0,0,0},1000,true};g=(AtlasStabilizationMagnetometer){{m[0],m[1],m[2]},1000,true};
+    for(unsigned i=0;i<1500;++i){x.timestamp_ms+=4;g.timestamp_ms=x.timestamp_ms;AtlasStabilization_SetMagnetometer(&s,&g);AtlasStabilization_Update(&s,&x,NULL,x.timestamp_ms);}
+    assert(s.mag_locked && angle_diff(s.heading_deg,90)<1.0f);
+    mag_frame(0,u,m);for(unsigned k=0;k<3;++k)g.gauss[k]=m[k]; /* field now says heading 0 while gyro says 90 */
+    bool ignored=false,recovered=false;
+    for(unsigned i=0;i<4000 && !recovered;++i)
+    {   x.timestamp_ms+=4;g.timestamp_ms=x.timestamp_ms;AtlasStabilization_SetMagnetometer(&s,&g);AtlasStabilization_Update(&s,&x,NULL,x.timestamp_ms);
+        ignored|=(s.flags&ATLAS_STAB_FLAG_MAG_IGNORED)&&s.mag_error_deg>20.0f;recovered=s.flags&ATLAS_STAB_FLAG_MAG_RECOVERY;}
+    assert(ignored && recovered);
+    /* Launch: the field is no longer used; a flipped field and boost acceleration leave a gyro-only heading alone. */
+    mag_frame(200,u,m);memset(&s,0,sizeof(s));
+    x=(AtlasStabilizationSample){{u[0],u[1],u[2]},{0,0,0},1000,true};g=(AtlasStabilizationMagnetometer){{m[0],m[1],m[2]},1000,true};
+    for(unsigned i=0;i<1500;++i){x.timestamp_ms+=4;g.timestamp_ms=x.timestamp_ms;AtlasStabilization_SetMagnetometer(&s,&g);AtlasStabilization_Update(&s,&x,NULL,x.timestamp_ms);}
+    assert(s.flags&ATLAS_STAB_FLAG_HEADING_VALID);
+    x.accel_g[0]=5;x.accel_g[1]=-8;x.accel_g[2]=2;for(unsigned k=0;k<3;++k)g.gauss[k]=-m[k];
+    for(unsigned i=0;i<250;++i){x.timestamp_ms+=4;g.timestamp_ms=x.timestamp_ms;AtlasStabilization_SetMagnetometer(&s,&g);AtlasStabilization_Update(&s,&x,NULL,x.timestamp_ms);}
+    assert(s.launched && (s.flags&ATLAS_STAB_FLAG_MAG_IGNORED) && (s.flags&ATLAS_STAB_FLAG_HEADING_VALID));
+    assert(angle_diff(s.heading_deg,200)<1.0f);
+    /* A +Z axis pointing straight up has no heading. */
+    AtlasStabilization v={0};AtlasStabilizationSample z={{0,0,1},{0,0,0},1000,true};
+    AtlasStabilizationMagnetometer h={{0.2f,0,-0.4f},1000,true};
+    for(unsigned i=0;i<300;++i){z.timestamp_ms+=4;h.timestamp_ms=z.timestamp_ms;AtlasStabilization_SetMagnetometer(&v,&h);AtlasStabilization_Update(&v,&z,NULL,z.timestamp_ms);}
+    assert(!(v.flags&ATLAS_STAB_FLAG_HEADING_VALID));
+    puts("PASS stabilization magnetometer: heading within 1 degree for 5 headings against independent NWU truth, gravity unmoved, bad/stale fields rejected, recovery, frozen after launch, vertical axis has no heading");
+}
+#endif
 static void motion(void)
 {
     AtlasStabilizationCommands s;
@@ -202,4 +354,4 @@ static void motion(void)
     assert(!AtlasStabilization_CommandsStep(NULL,t,p,0,now,result));
     puts("PASS stabilization commands: 200Hz direct tracking, rest-noise hold, independent shafts, reversals, bounded slow-tilt error, endpoints, singularity, late/wrap timing and failure atomicity");
 }
-int main(void){geometry();estimator();motion();return 0;}
+int main(void){geometry();estimator();fusion_attitude();launch_coast();magnetometer();motion();return 0;}

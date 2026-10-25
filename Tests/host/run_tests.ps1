@@ -38,7 +38,7 @@ $sources = @(
 
 & gcc -std=c11 -Wall -Wextra -Werror `
     -I (Join-Path $repoRoot 'Tests/host/mocks') `
-    -I (Join-Path $repoRoot 'App/Inc') `
+    -I (Join-Path $repoRoot 'App/Inc') -I (Join-Path $repoRoot 'ThirdParty/Fusion/Fusion') `
     -I (Join-Path $repoRoot 'ThirdParty/CEVA/sh2') `
     @sources -o $testOutput
 if ($LASTEXITCODE -ne 0) {
@@ -52,7 +52,7 @@ if ($LASTEXITCODE -ne 0) {
 
 & gcc -std=c11 -Wall -Wextra -Werror `
     -I (Join-Path $repoRoot 'Tests/host/mocks') `
-    -I (Join-Path $repoRoot 'App/Inc') `
+    -I (Join-Path $repoRoot 'App/Inc') -I (Join-Path $repoRoot 'ThirdParty/Fusion/Fusion') `
     -I (Join-Path $repoRoot 'ThirdParty/CEVA/sh2') `
     (Join-Path $repoRoot 'Tests/host/test_bno085_ceva.c') `
     (Join-Path $repoRoot 'Tests/host/test_hal_stubs.c') `
