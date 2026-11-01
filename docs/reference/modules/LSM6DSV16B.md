@@ -45,7 +45,7 @@ The EXTI callback only increments the coalesced INT1 counter. `AtlasIO` reacts t
 6. Write/read back accelerometer and gyroscope ODRs in `CTRL1`/`CTRL2`.
 7. Route both data-ready sources to INT1 when requested and verify `INT1_CTRL`.
 
-The driver does not enable FIFO, embedded sensor fusion, finite-state machines, or the separate audio path.
+The flight image (`AtlasLsm6dsv16b_FlightConfig()`) enables the tagged FIFO at 480 Hz, ±16 g and ±4000 dps, with sensor timestamps. [`atlas_imu_stream.c`](../../../App/Src/atlas_imu_stream.c) drains it over SPI3 DMA, falling back to polled SPI, and maps sensor time to MCU microseconds. Bringup keeps the data-ready configuration. Embedded sensor fusion, finite-state machines and the separate audio path are not used.
 
 ## Data contract
 
@@ -100,7 +100,7 @@ Multiple edges may coalesce into one foreground indication. Use the health inter
 
 ## Known limits
 
-- No FIFO/watermark handling, self-test, filtering selection, timestamp register, or sensor-hub feature is configured.
+- No FIFO watermark interrupt, self-test, filtering selection or sensor-hub feature is configured. FIFO DMA transfers, sample loss and the sensor-to-MCU clock mapping are bench-pending.
 - INT1 behavior and board-level pull configuration require physical confirmation.
 - Nominal sensitivities are not calibrated scale factors.
 - The direct IMU and BNO085 clocks are not synchronized.

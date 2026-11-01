@@ -99,6 +99,8 @@ def validate(frame: object) -> dict:
             raise ValueError('Invalid direct servo motion capability')
         if 'servo_sweep' in frame and (frame['profile'] != 'servo_bench' or type(frame['servo_sweep']) is not bool):
             raise ValueError('Invalid servo sweep capability')
+        if 'canard_roll' in frame and (frame['profile'] != 'servo_bench' or frame['canard_roll'] is not True):
+            raise ValueError('Invalid canard roll test capability')
         if 'stabilization' in frame and (frame['profile'] != 'servo_bench' or
                 frame['stabilization'] is not True or frame.get('stabilization_layout') != 1 or
                 frame.get('stabilization_storage') != 'sd'):

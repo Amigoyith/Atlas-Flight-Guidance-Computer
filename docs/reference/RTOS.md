@@ -76,8 +76,8 @@ SPI2 and I2C1 sensor operations, SPI3 IMU/external CS operations and UART mode/p
 |---|---|---:|
 | Board service | UART recovery, BNO085 bounded edge-gated SHTP phases, GNSS parse and buzzer expiry each cycle | Errors latch |
 | ADXL375 | Due every 2 ms, device ODR 400 Hz | 50 ms |
-| LSM6DSV16B | Coalesced INT1 or 5 ms fallback; accel + gyro ready; device ODR 240 Hz | 50 ms |
-| MMC5983MA | On-demand field due every 50 ms | 250 ms |
+| LSM6DSV16B | Flight image: 480 Hz tagged FIFO drained every I/O cycle over SPI3 DMA (polled fallback); sensor-timestamped samples mapped to MCU µs into a 128-sample ring read by `AtlasRtos_ReadImuSamples()`. Bringup: coalesced INT1 or 5 ms fallback at 240 Hz | 50 ms |
+| MMC5983MA | Split-phase field conversion started every 10 ms and collected on a later cycle; conversion-midpoint µs timestamp, also queued in a 16-sample ring for `AtlasRtos_ReadMagSamples()` | 250 ms |
 | MS5611 | D2/D1 OSR1024 due every 100 ms | 500 ms |
 | BNO085 | Requested accel/gyro/magnetic/rotation at 100/100/50/100 Hz | 500 ms per report |
 | GNSS NAV-PVT | RAM-configured 10 Hz | 1000 ms |
@@ -142,7 +142,7 @@ FreeRTOS V10.6.2 is native, preemptive/time-sliced, 1 kHz tick with FPU enabled.
 
 `AtlasTime_DelayMs()` rounds upward and adds a tick-phase allowance for minimum elapsed time, with overflow-safe chunking. Before scheduling it uses bounded HAL-delay chunks. A zero delay is a no-op; a nonzero ISR/suspended-scheduler call asserts. These minimum waits are not maximum response-time guarantees.
 
-Peripheral ISRs use no FreeRTOS API. TIM6 DMA completion/error, ADC flags, PVD/ECC, UART RX, PPS and EXTI callbacks perform bounded work only. A future kernel ISR API requires numerical NVIC priority 5–15 under group 4 plus a fresh latency/yield audit; high-urgency IRQs must remain kernel-independent.
+Peripheral ISRs use no FreeRTOS API. SPI3 DMA completion/error callbacks only set flags for the I/O task. TIM6 DMA completion/error, ADC flags, PVD/ECC, UART RX, PPS and EXTI callbacks perform bounded work only. A future kernel ISR API requires numerical NVIC priority 5–15 under group 4 plus a fresh latency/yield audit; high-urgency IRQs must remain kernel-independent.
 
 ## Watchdog and deadline coverage
 
@@ -158,7 +158,7 @@ These mechanisms detect modeled failures, but are not a schedulability proof. Me
 
 ## Memory and extensions
 
-Ordinary data and static task stacks remain in DTCM. Two aligned private DMA blocks occupy a 64-byte `.atlas_dma` NOLOAD section in AXI SRAM at `0x24000000`: ADC1 scan storage and the two-word pyro sequencer. Both GNU and IAR linkers explicitly place it. Startup seeds complete 64-bit ECC words before subword DMA access.
+Ordinary data and static task stacks remain in DTCM. Aligned private DMA blocks occupy a 1 KiB `.atlas_dma` NOLOAD section in AXI SRAM at `0x24000000`: ADC1 scan storage, the two-word pyro sequencer and the LSM6DSV16B SPI3 FIFO burst TX/RX buffers. Both GNU and IAR linkers explicitly place it. Startup seeds complete 64-bit ECC words before subword DMA access.
 
 C-library heap growth is prohibited: GNU's `_sbrk()` returns ENOMEM for every request and IAR's HEAP has size zero. Radio/BLE AT lines use bounded explicit formatting; they no longer pull libc printf/allocator paths into the GNU image. A zero linker heap reservation alone did not enforce this policy in the original generated `_sbrk()`.
 

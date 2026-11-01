@@ -77,15 +77,15 @@ static bool stab_ahrs_up(AtlasStabilization *s)
     s->up[0]=g.axis.x; s->up[1]=g.axis.y; s->up[2]=g.axis.z;
     return stab_unit(s->up);
 }
-/** @brief Heading of ATLAS_STAB_HEADING_AXIS, clockwise from magnetic north (Fusion is NWU).
- * R maps sensor to earth, so column k holds that axis in (north, west, up).
+/** @brief Heading of ATLAS_STAB_HEADING_AXIS, clockwise from magnetic north (Fusion is ENU).
+ * R maps sensor to earth, so column k holds that axis in (east, north, up).
  * @param s State. @return False when the axis is too close to vertical to define a heading. */
 static bool stab_heading(AtlasStabilization *s)
 {
     const FusionMatrix r=FusionQuaternionToMatrix(FusionAhrsGetQuaternion(&s->ahrs));
-    const float north=r.array[ATLAS_STAB_HEADING_AXIS], west=r.array[3U+ATLAS_STAB_HEADING_AXIS];
-    if(!isfinite(north) || !isfinite(west) || hypotf(north,west)<ATLAS_STAB_HEADING_MIN_HORIZONTAL) return false;
-    float h=atan2f(-west,north)/RAD_PER_DEG;
+    const float east=r.array[ATLAS_STAB_HEADING_AXIS], north=r.array[3U+ATLAS_STAB_HEADING_AXIS];
+    if(!isfinite(north) || !isfinite(east) || hypotf(north,east)<ATLAS_STAB_HEADING_MIN_HORIZONTAL) return false;
+    float h=atan2f(east,north)/RAD_PER_DEG;
     if(h<0.0f) h+=360.0f;
     s->heading_deg=h>=360.0f?0.0f:h;
     return true;
@@ -147,6 +147,7 @@ static void stab_ahrs_step(AtlasStabilization *s,const float w[3],const float a[
 static void stab_ahrs_start(AtlasStabilization *s,const float a[3],float an,bool have_mag)
 {
     FusionAhrsSettings settings=fusionAhrsDefaultSettings;
+    settings.convention=FusionConventionEnu; /* Project-wide earth frame: East, North, Up. */
     settings.sampleRate=STAB_AHRS_RATE_HZ; settings.gain=STAB_AHRS_GAIN;
     settings.accelerationRejection=STAB_AHRS_REJECT_DEG; settings.magneticRejection=STAB_AHRS_MAG_REJECT_DEG; settings.rejectionTimeout=STAB_AHRS_TIMEOUT_S;
     FusionAhrsInitialise(&s->ahrs); FusionAhrsSetSettings(&s->ahrs,&settings);
@@ -165,12 +166,16 @@ static void stab_ahrs_start(AtlasStabilization *s,const float a[3],float an,bool
     stab_ahrs_flags(s,false);
     (void)stab_ahrs_up(s);
 }
+/** @brief Store the newest magnetometer reading for the next Update; ignored after launch.
+ * @param s Estimator. @param m Reading, or NULL to clear. */
 void AtlasStabilization_SetMagnetometer(AtlasStabilization *s, const AtlasStabilizationMagnetometer *m)
 {
     s->mag_in_valid=m && m->valid;
     if(!s->mag_in_valid) return;
     memcpy(s->mag_in,m->gauss,sizeof(s->mag_in)); s->mag_in_ms=m->timestamp_ms;
 }
+/** @brief Latch launch: attitude becomes gyro-only from the current estimate.
+ * @param s Estimator. @return False if there is no attitude yet to coast from. */
 bool AtlasStabilization_Launch(AtlasStabilization *s)
 {
     if(!s->initialized) return false;

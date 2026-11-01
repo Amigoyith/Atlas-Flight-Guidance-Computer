@@ -26,8 +26,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 option(ATLAS_BRINGUP "Build the non-actuating PCB diagnostic application" OFF)
 option(ATLAS_SERVO_BENCH "Allow bounded, explicitly enabled servo tests (pyro inhibited)" OFF)
 option(ATLAS_STAB_USE_MAGNETOMETER "Feed the MMC5983MA to the stabilization estimator for pre-launch heading (axis map and hard-iron offset must be verified first)" OFF)
+option(ATLAS_CANARD_ROLL_TEST "ServoBench stabilization drives the canard roll-rate damp-and-hold test instead of gravity pointing" OFF)
 if(ATLAS_SERVO_BENCH AND NOT ATLAS_BRINGUP)
     message(FATAL_ERROR "ServoBench requires ATLAS_BRINGUP=ON")
+endif()
+if(ATLAS_CANARD_ROLL_TEST AND NOT ATLAS_SERVO_BENCH)
+    message(FATAL_ERROR "ATLAS_CANARD_ROLL_TEST requires ATLAS_SERVO_BENCH=ON")
 endif()
 
 # Core project settings
@@ -62,6 +66,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_bringup.c
     App/Src/atlas_bringup_protocol.c
     App/Src/atlas_buzzer.c
+    App/Src/atlas_canard.c
+    App/Src/atlas_canard_fusion.c
     App/Src/atlas_clock_map.c
     App/Src/atlas_gnss.c
     App/Src/atlas_imu_stream.c
@@ -115,6 +121,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     ATLAS_BRINGUP=$<BOOL:${ATLAS_BRINGUP}>
     ATLAS_SERVO_BENCH=$<BOOL:${ATLAS_SERVO_BENCH}>
     ATLAS_STAB_USE_MAGNETOMETER=$<BOOL:${ATLAS_STAB_USE_MAGNETOMETER}>
+    ATLAS_CANARD_ROLL_TEST=$<BOOL:${ATLAS_CANARD_ROLL_TEST}>
 )
 
 if(ATLAS_SERVO_BENCH)

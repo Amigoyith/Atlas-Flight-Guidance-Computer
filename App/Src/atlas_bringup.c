@@ -847,6 +847,9 @@ static void bench_hello(void)
     AtlasBench_JsonRaw(&json, ",\"servo_direct\":true,\"servo_sweep\":true");
     bench_field(&json, "servo_adc_samples", ATLAS_IO_SERVO_ADC_SAMPLES);
     AtlasBench_JsonRaw(&json, ",\"stabilization\":true,\"stabilization_layout\":1,\"stabilization_storage\":\"sd\"");
+#if defined(ATLAS_CANARD_ROLL_TEST) && ATLAS_CANARD_ROLL_TEST
+    AtlasBench_JsonRaw(&json, ",\"canard_roll\":true"); /* Stabilization runs the canard roll test. */
+#endif
 #else
     AtlasBench_JsonRaw(&json, ",\"pwm_pyro_inhibited\":true,\"servo_test\":false");
 #endif

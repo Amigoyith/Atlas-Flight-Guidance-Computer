@@ -15,6 +15,8 @@ $testOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-protocol-t
 $sh2Output = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-sh2-timeout-tests.exe'
 $bnoCevaOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-bno-ceva-tests.exe'
 $samplePathOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-sample-path-tests.exe'
+$canardOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-canard-tests.exe'
+$canardFusionOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-canard-fusion-tests.exe'
 
 $sources = @(
     'Tests/host/test_protocols.c',
@@ -91,6 +93,36 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 & $samplePathOutput
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& gcc -std=c11 -Wall -Wextra -Werror `
+    -I (Join-Path $repoRoot 'App/Inc') `
+    (Join-Path $repoRoot 'Tests/host/test_canard.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_canard.c') -lm -o $canardOutput
+if ($LASTEXITCODE -ne 0) {
+    throw "Canard test compilation failed with exit code $LASTEXITCODE."
+}
+
+& $canardOutput
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& gcc -std=c11 -Wall -Wextra -Werror `
+    -I (Join-Path $repoRoot 'App/Inc') `
+    -I (Join-Path $repoRoot 'ThirdParty/Fusion/Fusion') `
+    (Join-Path $repoRoot 'Tests/host/test_canard_fusion.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_canard_fusion.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_canard.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_stabilization.c') `
+    (Join-Path $repoRoot 'ThirdParty/Fusion/Fusion/FusionAhrs.c') -lm -o $canardFusionOutput
+if ($LASTEXITCODE -ne 0) {
+    throw "Canard Fusion chain test compilation failed with exit code $LASTEXITCODE."
+}
+
+& $canardFusionOutput
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

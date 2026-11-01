@@ -28,6 +28,17 @@
 #if ATLAS_SERVO_BENCH
 #include <math.h>
 #endif
+#ifndef ATLAS_CANARD_ROLL_TEST
+#define ATLAS_CANARD_ROLL_TEST 0
+#endif
+#if ATLAS_CANARD_ROLL_TEST
+#if !ATLAS_SERVO_BENCH
+#error "ATLAS_CANARD_ROLL_TEST runs inside the ServoBench stabilization owner"
+#endif
+#include "atlas_canard_fusion.h"
+/* The bench has no airflow: a fixed nominal airspeed sets the deflection scale. */
+#define IO_ROLL_TEST_AIRSPEED_M_S (60.0f)
+#endif
 
 #define IO_STACK_WORDS (1536U)
 #define IO_PERIOD_MS (5U)
@@ -95,6 +106,12 @@ static bool stab_pending, stab_pending_success, stab_pending_boot, stab_save_bus
 static bool stab_switch_released, stab_switch_high, stab_fault;
 static uint32_t stab_pending_token, stab_switch_ms, stab_last_ms;
 static const uint8_t stab_channels[4]={6U,7U,0U,1U};
+#if ATLAS_CANARD_ROLL_TEST
+static AtlasCanard roll_ctl;
+static uint16_t roll_pulses[4];
+static uint32_t roll_sample_ms;
+static bool roll_have_sample;
+#endif
 /** @brief Check the current servo rail. @param now Tick. @return Usable supply. */
 static bool io_servo_rails(uint32_t now);
 #endif
@@ -666,6 +683,46 @@ static bool io_servo_rails(uint32_t now)
         io_rail(ATLAS_ANALOG_PWM_SUPPLY, now, 1U, ATLAS_IO_SERVO_MAX_MV);
 }
 
+#if ATLAS_CANARD_ROLL_TEST
+/** @brief Configure the roll-only canard controller for the four stabilization servos.
+ * Azimuths convert the bench's clockwise-from-USB-C angles (45/135/225/315 for PCB
+ * 7/8/1/2) to the controller's counterclockwise convention; saved reverse bits flip
+ * servo direction. Body +Z is the calibrated upright, azimuth 0 the STM32 face (+Z).
+ * @return False if the calibration cannot define the canard axes. */
+static bool io_roll_test_start(void)
+{
+    static const float azimuth_ccw[4]={315.0f,225.0f,135.0f,45.0f};
+    static const float face[3]={0.0f,0.0f,1.0f};
+    AtlasCanardConfig c;
+    AtlasCanard_RollOnlyConfig(&c);
+    for(unsigned i=0;i<4U;++i)
+    {
+        c.canard[i].azimuth_deg=azimuth_ccw[i];
+        c.canard[i].servo_center_us=1500.0f;
+        c.canard[i].servo_us_per_deg=(stab_config.reverse_mask&(1UL<<i))!=0U?-10.0f:10.0f;
+    }
+    if(!AtlasCanard_MountFromAxes(stab_config.upright,face,c.sensor_from_body)) return false;
+    roll_have_sample=false;
+    for(unsigned i=0;i<4U;++i) roll_pulses[i]=1500U;
+    return AtlasCanard_Init(&roll_ctl,&c);
+}
+/** @brief Run the controller once per new IMU sample; pulses persist between samples.
+ * @param sample Sample the estimator just consumed. @return False on an unusable input. */
+static bool io_roll_test_step(const AtlasStabilizationSample *sample)
+{
+    if(roll_have_sample && sample->timestamp_ms==roll_sample_ms) return true;
+    AtlasCanardInput in;
+    AtlasCanardOutput out;
+    if(!AtlasCanard_InputFromEstimator(&stab_filter,sample,&stab_config,IO_ROLL_TEST_AIRSPEED_M_S,true,&in))
+        return false;
+    AtlasCanard_Step(&roll_ctl,&in,&out);
+    if(out.state!=ATLAS_CANARD_ACTIVE) return false;
+    roll_have_sample=true; roll_sample_ms=sample->timestamp_ms;
+    for(unsigned i=0;i<4U;++i) roll_pulses[i]=out.pulse_us[i];
+    return true;
+}
+#endif
+
 /** @brief Read new sensor data and execute the autonomous bench mode in the output owner.
  * @param now Current tick. Float work is outside the short register critical section. */
 static void io_stabilization_service(uint32_t now)
@@ -730,17 +787,28 @@ static void io_stabilization_service(uint32_t now)
         return;
     }
     if((uint32_t)(now-stab_switch_ms)<100U) { s->state=3U; return; }
-    uint16_t previous[4],targets[4];
+    uint16_t previous[4],commands[4];
     for(unsigned i=0;i<4U;++i) previous[i]=s->active?working.commanded_pwm_us[stab_channels[i]]:1500U;
+    const bool advance=s->active && (uint32_t)(now-stab_last_ms)>=ATLAS_STAB_COMMAND_PERIOD_MS;
+#if ATLAS_CANARD_ROLL_TEST
+    /* Roll test: the canard controller (already slew-capped) replaces gravity targets.
+     * Every other gate (SW2, rail, estimator, cancel, emergency) is unchanged. */
+    if(s->active?!io_roll_test_step(&sample):!io_roll_test_start())
+    { const AtlasStabilizationFault detail=s->active?ATLAS_STAB_FAULT_COMMAND:ATLAS_STAB_FAULT_GEOMETRY;
+      io_pwm_disable(UINT8_MAX); s->active=false; stab_fault=true; s->state=5U; s->reason=7U;
+      s->fault_detail=detail; return; }
+    s->limited_mask=s->singular_mask=0U;
+    memcpy(commands,roll_pulses,sizeof(commands));
+#else
+    uint16_t targets[4];
     if(!AtlasStabilization_Targets(&stab_config,stab_filter.up,previous,targets,&s->limited_mask,&s->singular_mask))
     { io_pwm_disable(UINT8_MAX); s->active=false; stab_fault=true; s->state=5U; s->reason=7U;
       s->fault_detail=ATLAS_STAB_FAULT_GEOMETRY; return; }
-    const bool advance=s->active && (uint32_t)(now-stab_last_ms)>=ATLAS_STAB_COMMAND_PERIOD_MS;
-    uint16_t commands[4];
     AtlasStabilizationCommands next_commands=stab_commands;
     if(advance && !AtlasStabilization_CommandsStep(&next_commands,targets,previous,s->singular_mask,now,commands))
     { io_pwm_disable(UINT8_MAX); s->active=false; stab_fault=true; s->state=5U; s->reason=7U;
       s->fault_detail=ATLAS_STAB_FAULT_COMMAND; return; }
+#endif
     const uint32_t lock=io_lock();
     if(cycle_cancel!=servo_cancel_epoch || emergency_latched ||
        HAL_GPIO_ReadPin(EXT_SWITCH_GPIO_Port,EXT_SWITCH_Pin)!=GPIO_PIN_SET)
@@ -770,7 +838,9 @@ static void io_stabilization_service(uint32_t now)
     }
     else if(advance)
     {
+#if !ATLAS_CANARD_ROLL_TEST
         stab_commands=next_commands;
+#endif
         for(unsigned i=0;i<4U;++i)
         {
             const uint16_t pulse=commands[i];

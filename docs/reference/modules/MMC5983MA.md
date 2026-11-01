@@ -20,7 +20,7 @@ Identity, reset behavior, bandwidth readback, packed 18-bit decoding, on-demand 
 
 ## RTOS access
 
-`AtlasIO` runs the bounded automatic SET/RESET field conversion every 50 ms and publishes `AtlasRtosSnapshot.mmc5983ma`. Require `ATLAS_RTOS_VALID_MMC5983MA`, `mmc5983ma_status == ATLAS_OK`, and a reviewed age limit. Explicit paired SET/RESET offset cancellation and temperature reads are maintenance/test operations not currently exposed through the runtime command queue; add an I/O-owner command rather than calling the driver from application code.
+`AtlasIO` starts a bounded automatic SET/RESET field conversion every 10 ms and collects it on a later cycle (`AtlasMmc5983ma_StartMeasurement()`/`PollMeasurement()`), so the I/O task never waits for a conversion. It publishes `AtlasRtosSnapshot.mmc5983ma` and queues each sample, stamped at the conversion midpoint in MCU µs, for `AtlasRtos_ReadMagSamples()`. Require `ATLAS_RTOS_VALID_MMC5983MA`, `mmc5983ma_status == ATLAS_OK`, and a reviewed age limit. Explicit paired SET/RESET offset cancellation and temperature reads are maintenance/test operations not currently exposed through the runtime command queue; add an I/O-owner command rather than calling the driver from application code.
 
 ## Board contract
 
