@@ -365,6 +365,14 @@ static void bench_sample(void)
         last_mmc = now;
         s->mmc5983ma_status = AtlasMmc5983ma_ReadField(&bench_board->mmc5983ma, &s->mmc5983ma, 10U);
         bench_sample_result(2U, s->mmc5983ma_status, true);
+#if ATLAS_SERVO_BENCH
+        {
+            const AtlasStabilizationMagnetometer mag={
+                {s->mmc5983ma.x_gauss,s->mmc5983ma.y_gauss,s->mmc5983ma.z_gauss},
+                s->mmc5983ma.timestamp_ms,s->mmc5983ma_status==ATLAS_OK};
+            AtlasIo_StabilizationMagnetometer(&mag);
+        }
+#endif
     }
     else if ((uint32_t)(now - last_baro) >= 200U && bench_board->init.ms5611 == ATLAS_OK)
     {
@@ -1113,6 +1121,12 @@ static void bench_status(void)
     bench_field(&j,"singular",io.stabilization.singular_mask);
     bench_field(&j,"reverse_mask",io.stabilization.reverse_mask);
     bench_field(&j,"fault_detail",io.stabilization.fault_detail);
+    bench_field(&j,"ahrs_flags",io.stabilization.ahrs_flags);
+    bench_field(&j,"accel_err_cdeg",(uint32_t)lroundf(fminf(fmaxf(io.stabilization.accel_error_deg,0.0f),180.0f)*100.0f));
+    bench_field(&j,"mag_err_cdeg",(uint32_t)lroundf(fminf(fmaxf(io.stabilization.mag_error_deg,0.0f),180.0f)*100.0f));
+    bench_field(&j,"mag_trigger_pm",(uint32_t)lroundf(fminf(fmaxf(io.stabilization.mag_trigger,0.0f),1.0f)*1000.0f));
+    bench_field(&j,"heading_cdeg",(uint32_t)lroundf(fminf(fmaxf(io.stabilization.heading_deg,0.0f),359.99f)*100.0f));
+    bench_field(&j,"accel_trigger_pm",(uint32_t)lroundf(fminf(fmaxf(io.stabilization.accel_trigger,0.0f),1.0f)*1000.0f));
     AtlasBench_JsonRaw(&j,",\"up_mg\":");
     bench_vector(&j,io.stabilization.up[0],io.stabilization.up[1],io.stabilization.up[2],1000U);
 #endif

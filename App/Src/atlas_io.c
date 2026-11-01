@@ -90,6 +90,7 @@ static AtlasStabilization stab_filter;
 static AtlasStabilizationCommands stab_commands;
 static AtlasStabilizationConfig stab_config, stab_pending_config;
 static AtlasStabilizationSample stab_sample;
+static AtlasStabilizationMagnetometer stab_magnetometer;
 static bool stab_pending, stab_pending_success, stab_pending_boot, stab_save_busy;
 static bool stab_switch_released, stab_switch_high, stab_fault;
 static uint32_t stab_pending_token, stab_switch_ms, stab_last_ms;
@@ -581,6 +582,16 @@ void AtlasIo_StabilizationSample(const AtlasStabilizationSample *sample)
     (void)sample;
 #endif
 }
+/** @brief Copy the latest optional magnetometer reading for heading. @param mag Input. */
+void AtlasIo_StabilizationMagnetometer(const AtlasStabilizationMagnetometer *mag)
+{
+#if ATLAS_SERVO_BENCH
+    if(!mag) return;
+    const uint32_t lock=io_lock(); stab_magnetometer=*mag; io_unlock(lock);
+#else
+    (void)mag;
+#endif
+}
 /** @brief Prepare one explicit persisted change. @param operation Off/on/calibrate/directions.
  * @param reverse Direction bits. @param config Output. @param token Epoch. @return Status. */
 AtlasStatus AtlasIo_StabilizationPrepare(uint32_t operation,uint32_t reverse,
@@ -682,9 +693,14 @@ static void io_stabilization_service(uint32_t now)
         io_unlock(lock);
     }
     AtlasStabilizationSample sample;
-    const uint32_t copy_lock=io_lock(); sample=stab_sample; io_unlock(copy_lock);
+    AtlasStabilizationMagnetometer mag;
+    const uint32_t copy_lock=io_lock(); sample=stab_sample; mag=stab_magnetometer; io_unlock(copy_lock);
+    AtlasStabilization_SetMagnetometer(&stab_filter,&mag);
     AtlasStabilization_Update(&stab_filter,&sample,s->calibrated?&stab_config:NULL,now);
     memcpy(s->up,stab_filter.up,sizeof(s->up));
+    s->ahrs_flags=stab_filter.flags; s->accel_error_deg=stab_filter.accel_error_deg;
+    s->accel_trigger=stab_filter.accel_trigger; s->mag_error_deg=stab_filter.mag_error_deg;
+    s->mag_trigger=stab_filter.mag_trigger; s->heading_deg=stab_filter.heading_deg;
     AtlasStabilizationConfig candidate;
     s->calibration_ready=AtlasStabilization_Calibrate(&stab_filter,0U,&candidate);
     s->save_busy=stab_save_busy;

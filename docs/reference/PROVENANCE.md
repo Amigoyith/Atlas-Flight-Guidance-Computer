@@ -9,7 +9,10 @@ This reference combines import history and dependency policy. Current capability
 | STM32 generator | STM32CubeMX 6.17.0; STM32Cube FW_H7 1.13.0 | `Atlas.ioc`, generated configuration, HAL/CMSIS, FatFs and USB middleware |
 | FreeRTOS Kernel | V10.6.2 from the locally installed STM32CubeH7 1.13.0 package; [upstream](https://github.com/FreeRTOS/FreeRTOS-Kernel) | [Kernel subset](../../ThirdParty/FreeRTOS-Kernel/README.md) |
 | CEVA SH-2/SHTP | [Upstream commit b514b1e2586ddc195e553dac89fc94c637b25298](https://github.com/ceva-dsp/sh2/tree/b514b1e2586ddc195e553dac89fc94c637b25298) | [BNO085 protocol library](../../ThirdParty/CEVA/sh2/README.md) |
+| Fusion AHRS | [Git submodule at upstream commit a8d7224f36a0ec82345ef49a3db50e65f8d3bab8](https://github.com/xioTechnologies/Fusion/tree/a8d7224f36a0ec82345ef49a3db50e65f8d3bab8) (MIT) | [Attitude estimator](../../ThirdParty/Fusion/README.md); only `FusionAhrs.c` is compiled |
 | Laptop bring-up transport | [pyserial 3.5 documentation](https://pyserial.readthedocs.io/en/latest/pyserial_api.html); pinned in [requirements](../../tools/bringup/requirements.txt) | Optional local Python virtual environment, not vendored or linked into MCU firmware; retain distribution notices |
+
+Fusion is a git submodule (`.gitmodules`); clone with `--recurse-submodules` or run `git submodule update --init`. Its [MIT license](../../ThirdParty/Fusion/LICENSE.md) is retained. [atlas_stabilization.c](../../App/Src/atlas_stabilization.c) feeds it gyro, in-range accelerometer and (pre-launch only) conditioned MMC5983MA samples, starts it at the measured up vector, and sets the sample period from each measured interval; the existing freshness, calibration and geometry logic is unchanged.
 
 FreeRTOS retains its [MIT license](../../ThirdParty/FreeRTOS-Kernel/LICENSE). CEVA retains Apache-2.0 notices in source headers and [NOTICE.txt](../../ThirdParty/CEVA/sh2/NOTICE.txt). Preserve all vendor notices and component-specific licenses; the repository has **no selected project-level license**.
 

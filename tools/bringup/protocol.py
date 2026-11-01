@@ -245,6 +245,13 @@ def validate(frame: object) -> dict:
             stab = frame.get('stabilization')
             if isinstance(stab,dict) and 'fault_detail' in stab and not _integer(stab['fault_detail'],0,10):
                 raise ValueError('Invalid stabilization fault detail')
+            if isinstance(stab,dict) and (not _integer(stab.get('ahrs_flags',0),0,255) or
+                    not _integer(stab.get('mag_err_cdeg',0),0,18000) or
+                    not _integer(stab.get('mag_trigger_pm',0),0,1000) or
+                    not _integer(stab.get('heading_cdeg',0),0,35999) or
+                    not _integer(stab.get('accel_err_cdeg',0),0,18000) or
+                    not _integer(stab.get('accel_trigger_pm',0),0,1000)):
+                raise ValueError('Invalid stabilization AHRS flags')
             autonomous = isinstance(stab, dict) and stab.get('active') == 1
             if stab is not None:
                 if (not isinstance(stab, dict) or

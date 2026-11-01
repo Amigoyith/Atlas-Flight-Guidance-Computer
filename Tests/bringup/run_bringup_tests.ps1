@@ -20,13 +20,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Run Start Atlas Dashboard.cmd --check to prepa
 $bringupOutput = Join-Path ([IO.Path]::GetTempPath()) ('atlas-bringup-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $bringupOutput | Out-Null
 Write-Host "Inert bring-up tests: $bringupOutput"
-& gcc -std=c11 -O2 -Wall -Wextra -Werror -I (Join-Path $bringupRoot 'App/Inc') `
+& gcc -std=c11 -O2 -Wall -Wextra -Werror -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     (Join-Path $bringupRoot 'Tests/bringup/test_telemetry.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_telemetry.c') -o (Join-Path $bringupOutput 'telemetry.exe')
 if ($LASTEXITCODE -ne 0) { exit 2 }
 & (Join-Path $bringupOutput 'telemetry.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& gcc -std=c11 -Wall -Wextra -Werror -I (Join-Path $bringupRoot 'App/Inc') `
+& gcc -std=c11 -Wall -Wextra -Werror -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     (Join-Path $bringupRoot 'Tests/bringup/test_radio_link.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_radio_link.c') -o (Join-Path $bringupOutput 'radio-link.exe')
 if ($LASTEXITCODE -ne 0) { exit 2 }
@@ -43,23 +43,24 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & node (Join-Path $bringupRoot 'Tests/bringup/test_radio_ui.js')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& gcc -std=c11 -Wall -Wextra -Werror -I (Join-Path $bringupRoot 'App/Inc') `
+& gcc -std=c11 -Wall -Wextra -Werror -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     (Join-Path $bringupRoot 'Tests/bringup/test_protocol.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_bringup_protocol.c') -lm -o (Join-Path $bringupOutput 'protocol.exe')
 if ($LASTEXITCODE -ne 0) { exit 2 }
 & (Join-Path $bringupOutput 'protocol.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -Wall -Wextra -Werror -Wno-pointer-to-int-cast -DATLAS_BRINGUP=1 `
-    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') `
+    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     (Join-Path $bringupRoot 'Tests/services/test_io.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_pyro_policy.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_analog.c') `
-    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') -lm -o (Join-Path $bringupOutput 'io.exe')
+    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') `
+    (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion/FusionAhrs.c') -lm -o (Join-Path $bringupOutput 'io.exe')
 if ($LASTEXITCODE -ne 0) { exit 2 }
 & (Join-Path $bringupOutput 'io.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -Wall -Wextra -Werror -DATLAS_BRINGUP=1 `
-    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') `
+    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     -I (Join-Path $bringupRoot 'FATFS/App') -I (Join-Path $bringupRoot 'FATFS/Target') `
     -I (Join-Path $bringupRoot 'Middlewares/Third_Party/FatFs/src') `
     (Join-Path $bringupRoot 'Tests/services/test_storage_owner.c') `
@@ -68,7 +69,7 @@ if ($LASTEXITCODE -ne 0) { exit 2 }
 & (Join-Path $bringupOutput 'storage.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -O2 -Wall -Wextra -Werror -DATLAS_BRINGUP=1 `
-    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') `
+    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     -I (Join-Path $bringupRoot 'ThirdParty/CEVA/sh2') `
     (Join-Path $bringupRoot 'Tests/bringup/test_console.c') `
     (Join-Path $bringupRoot 'Tests/services/service_model.c') `
@@ -83,7 +84,7 @@ $env:ATLAS_CONSOLE_TEST_EXE = Join-Path $bringupOutput 'console.exe'
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $Python (Join-Path $bringupRoot 'tools/bringup/dashboard.py') --smoke-test
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& gcc -std=c11 -Wall -Wextra -Werror -DATLAS_BOOT_HOST_TEST -I (Join-Path $bringupRoot 'App/Inc') `
+& gcc -std=c11 -Wall -Wextra -Werror -DATLAS_BOOT_HOST_TEST -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     (Join-Path $bringupRoot 'Tests/bringup/test_boot.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_boot.c') -o (Join-Path $bringupOutput 'boot.exe')
 if ($LASTEXITCODE -ne 0) { exit 2 }
@@ -92,16 +93,17 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $Python (Join-Path $bringupRoot 'Tests/bringup/test_ground_station.py')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -Wall -Wextra -Werror -Wno-pointer-to-int-cast -DATLAS_BRINGUP=1 -DATLAS_SERVO_BENCH=1 `
-    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') `
+    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     (Join-Path $bringupRoot 'Tests/services/test_io.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_pyro_policy.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_analog.c') `
-    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') -lm -o (Join-Path $bringupOutput 'servo-io.exe')
+    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') `
+    (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion/FusionAhrs.c') -lm -o (Join-Path $bringupOutput 'servo-io.exe')
 if ($LASTEXITCODE -ne 0) { exit 2 }
 & (Join-Path $bringupOutput 'servo-io.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -O2 -Wall -Wextra -Werror -DATLAS_BRINGUP=1 -DATLAS_SERVO_BENCH=1 `
-    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') `
+    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     -I (Join-Path $bringupRoot 'ThirdParty/CEVA/sh2') `
     (Join-Path $bringupRoot 'Tests/bringup/test_console.c') `
     (Join-Path $bringupRoot 'Tests/services/service_model.c') `
@@ -119,19 +121,28 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & node (Join-Path $bringupRoot 'Tests/bringup/test_servo_ui.js')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& gcc -std=c11 -Wall -Wextra -Werror -I (Join-Path $bringupRoot 'App/Inc') `
+& gcc -std=c11 -Wall -Wextra -Werror -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     (Join-Path $bringupRoot 'Tests/bringup/test_stabilization.c') `
-    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') -lm -o (Join-Path $bringupOutput 'stabilization.exe')
+    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') `
+    (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion/FusionAhrs.c') -lm -o (Join-Path $bringupOutput 'stabilization.exe')
 if ($LASTEXITCODE -ne 0) { exit 2 }
 & (Join-Path $bringupOutput 'stabilization.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& gcc -std=c11 -Wall -Wextra -Werror -DATLAS_STAB_USE_MAGNETOMETER=1 -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
+    (Join-Path $bringupRoot 'Tests/bringup/test_stabilization.c') `
+    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') `
+    (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion/FusionAhrs.c') -lm -o (Join-Path $bringupOutput 'stabilization-mag.exe')
+if ($LASTEXITCODE -ne 0) { exit 2 }
+& (Join-Path $bringupOutput 'stabilization-mag.exe')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -Wall -Wextra -Werror -DATLAS_BRINGUP=1 -DATLAS_SERVO_BENCH=1 `
-    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') `
+    -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
     -I (Join-Path $bringupRoot 'FATFS/App') -I (Join-Path $bringupRoot 'FATFS/Target') `
     -I (Join-Path $bringupRoot 'Middlewares/Third_Party/FatFs/src') `
     (Join-Path $bringupRoot 'Tests/services/test_storage_owner.c') `
     (Join-Path $bringupRoot 'Tests/services/service_model.c') `
-    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') -lm -o (Join-Path $bringupOutput 'stabilization-storage.exe')
+    (Join-Path $bringupRoot 'App/Src/atlas_stabilization.c') `
+    (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion/FusionAhrs.c') -lm -o (Join-Path $bringupOutput 'stabilization-storage.exe')
 if ($LASTEXITCODE -ne 0) { exit 2 }
 & (Join-Path $bringupOutput 'stabilization-storage.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
