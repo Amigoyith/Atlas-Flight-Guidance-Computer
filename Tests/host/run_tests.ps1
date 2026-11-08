@@ -17,6 +17,8 @@ $bnoCevaOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-bno-cev
 $samplePathOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-sample-path-tests.exe'
 $canardOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-canard-tests.exe'
 $canardFusionOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-canard-fusion-tests.exe'
+$flightOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-flight-tests.exe'
+$flightEstimatorOutput = Join-Path ([System.IO.Path]::GetTempPath()) 'atlas-host-flight-estimator-tests.exe'
 
 $sources = @(
     'Tests/host/test_protocols.c',
@@ -123,6 +125,34 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 & $canardFusionOutput
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& gcc -std=c11 -Wall -Wextra -Werror `
+    -I (Join-Path $repoRoot 'App/Inc') `
+    (Join-Path $repoRoot 'Tests/host/test_flight.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_flight.c') -lm -o $flightOutput
+if ($LASTEXITCODE -ne 0) {
+    throw "Flight state machine test compilation failed with exit code $LASTEXITCODE."
+}
+
+& $flightOutput
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& gcc -std=c11 -Wall -Wextra -Werror `
+    -I (Join-Path $repoRoot 'App/Inc') `
+    -I (Join-Path $repoRoot 'ThirdParty/Fusion/Fusion') `
+    (Join-Path $repoRoot 'Tests/host/test_flight_estimator.c') `
+    (Join-Path $repoRoot 'App/Src/atlas_flight_estimator.c') `
+    (Join-Path $repoRoot 'ThirdParty/Fusion/Fusion/FusionAhrs.c') -lm -o $flightEstimatorOutput
+if ($LASTEXITCODE -ne 0) {
+    throw "Flight estimator test compilation failed with exit code $LASTEXITCODE."
+}
+
+& $flightEstimatorOutput
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
