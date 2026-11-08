@@ -328,7 +328,7 @@ static void bench_sample(void)
     AtlasRtosSnapshot *s = &working.sensors;
     const uint32_t now = HAL_GetTick();
     s->board_service_status = AtlasBoard_Service(bench_board);
-    if ((uint32_t)(now - last_direct) >= 5U)
+    if ((uint32_t)(now - last_direct) >= 2U)
     {
         last_direct = now;
         bool ready = false;
