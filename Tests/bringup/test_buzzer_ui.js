@@ -15,7 +15,7 @@ function render(edit=''){
 render();assert.equal(element('march-button').disabled,false);assert.equal(element('birthday-button').disabled,false);
 assert.match(element('buzzer-status').textContent,/Ready/);
 for(const edit of ["state.mode='demo'","state.fresh=false","state.blocked='uncertain'",
-  "state.pending='probe gnss'","state.batch=['probe bno']","state.updating=true",
+  "state.pending='probe gnss'","state.batch=['probe baro']","state.updating=true",
   "delete state.hello.buzzer_melody","delete state.status.buzzer"]){
   render(edit);assert.equal(element('march-button').disabled,true,edit);assert.equal(element('birthday-button').disabled,true,edit);
 }

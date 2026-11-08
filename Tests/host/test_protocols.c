@@ -13,7 +13,6 @@
  * - test_ble_persistent_profile(): checks post-restart profile/DSR verification.
  * - test_ble_response_overflow(): checks that truncated AT evidence fails closed.
  * - test_rfd_parameter_readback(): checks identity/settings and S-register verification.
- * - test_bno085_i2c_contract(): checks staged SHTP reads and shared-bus recovery.
  * - test_buzzer_differential_contract(): checks opposite PWM modes and timed stop.
  * - test_led_gpio_ownership(): checks TIM4-staged pins remain hard-inhibited low.
  * - test_uart_overflow_accounting(): checks fail-visible SPSC ring overflow.
@@ -28,7 +27,6 @@
 
 #include "atlas_adxl375.h"
 #include "atlas_ble.h"
-#include "atlas_bno085.h"
 #include "atlas_buzzer.h"
 #include "atlas_gnss.h"
 #include "atlas_led.h"
@@ -37,12 +35,9 @@
 #include "atlas_ms5611.h"
 #include "atlas_rfd900x.h"
 #include "atlas_rtos_policy.h"
-#include "test_bno085_sh2_stubs.h"
 
 /* U12 SA0/H_MOSI is hard-strapped low on Atlas rev-0.1. Keep the transport
  * address tied to that immutable board contract, not a remembered default. */
-_Static_assert(ATLAS_BNO085_I2C_ADDRESS_7BIT == 0x4AU,
-               "Atlas rev-0.1 BNO085 address must follow the SA0-low strap");
 
 static unsigned atlas_test_failures;
 static AtlasUartTransport *atlas_test_gnss_transport;
@@ -338,67 +333,6 @@ static void test_led_gpio_ownership(void)
     AtlasTest_SetGpioReadHook(NULL);
     AtlasLed_Off(&led);
     CHECK(AtlasLed_ReadGateMask(&led) == ATLAS_LED_OFF);
-}
-
-/**
- * @brief Verify CEVA's two-interrupt I2C framing and recovery of the shared bus.
- */
-static void test_bno085_i2c_contract(void)
-{
-    AtlasBno085 sensor;
-    I2C_HandleTypeDef i2c;
-    TIM_TypeDef timer_instance;
-    TIM_HandleTypeDef timer;
-
-    memset(&i2c, 0, sizeof(i2c));
-    memset(&timer_instance, 0, sizeof(timer_instance));
-    memset(&timer, 0, sizeof(timer));
-    timer.Instance = &timer_instance;
-    timer.State = HAL_TIM_STATE_READY;
-    AtlasTest_ResetI2cTrace();
-    AtlasTest_BnoSh2Begin(&i2c, false);
-    CHECK(AtlasBno085_Init(&sensor, &i2c, &timer, NULL, NULL) == ATLAS_OK);
-    CHECK(sensor.initialized && sensor.session_open && !sensor.transport_failed);
-    CHECK(sensor.address_hal == 0x94U);
-    CHECK(sensor.pending_transfer_length == 0U);
-    CHECK(sensor.health.transfers_read == 1U);
-    CHECK(sensor.health.io_errors == 0U);
-    CHECK(AtlasTest_BnoSh2ReceiveCalls() == 2U);
-    CHECK(AtlasTest_BnoSh2ContractPassed());
-    CHECK(AtlasTest_BnoSh2FullReadTimeoutMs() >= 143U);
-    CHECK(AtlasTest_BnoSh2FullReadTimeoutMs() < 250U);
-    CHECK(AtlasBno085_EnableReport(&sensor, SH2_ACCELEROMETER, 10000U, 0U) == ATLAS_OK);
-    CHECK(AtlasTest_BnoSh2WriteCalls() == 1U);
-    AtlasBno085_Deinit(&sensor);
-    CHECK(!sensor.initialized && !sensor.session_open);
-    CHECK(AtlasTest_GetI2cDeinitCount() == 0U);
-    AtlasTest_BnoSh2End();
-
-    memset(&i2c, 0, sizeof(i2c));
-    memset(&timer_instance, 0, sizeof(timer_instance));
-    memset(&timer, 0, sizeof(timer));
-    timer.Instance = &timer_instance;
-    timer.State = HAL_TIM_STATE_READY;
-    AtlasTest_ResetGpioTrace();
-    AtlasTest_ResetI2cTrace();
-    AtlasTest_BnoSh2Begin(&i2c, true);
-    CHECK(AtlasBno085_Init(&sensor, &i2c, &timer, NULL, NULL) == ATLAS_ERROR_IO);
-    CHECK(!sensor.initialized && !sensor.session_open && sensor.transport_failed);
-    CHECK(AtlasTest_BnoSh2ReceiveCalls() == 3U);
-    CHECK(sensor.health.io_errors == 1U);
-    CHECK(sensor.health.last_hal_status == HAL_TIMEOUT);
-    CHECK(sensor.health.last_hal_error == 0x20U);
-    CHECK(sensor.health.last_failure_stage == ATLAS_BNO085_FAILURE_READ_HEADER);
-    CHECK(sensor.health.last_transfer_length == 4U);
-    CHECK(sensor.health.bus_recovery_attempts == 1U);
-    CHECK(sensor.health.bus_recovery_failures == 0U);
-    CHECK(AtlasTest_GetI2cDeinitCount() == 1U);
-    CHECK(AtlasTest_GetI2cDeinitWhileBnoResetCount() == 1U);
-    CHECK(AtlasTest_GetI2cInitCount() == 1U);
-    CHECK(AtlasTest_GetI2cAnalogFilterCount() == 1U);
-    CHECK(AtlasTest_GetI2cDigitalFilterCount() == 1U);
-    CHECK((AtlasTest_GetHighPins(BNO085_NRST_GPIO_Port) & BNO085_NRST_Pin) == 0U);
-    AtlasTest_BnoSh2End();
 }
 
 /** @brief Verify TIM15 opposite-phase configuration, bounds, start, and timed stop. */
@@ -1282,7 +1216,6 @@ int main(void)
     test_ble_persistent_profile();
     test_ble_response_overflow();
     test_rfd_parameter_readback();
-    test_bno085_i2c_contract();
     test_led_gpio_ownership();
     test_buzzer_differential_contract();
     test_uart_overflow_accounting();

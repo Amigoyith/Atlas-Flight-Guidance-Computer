@@ -43,7 +43,6 @@ static uint32_t atlas_test_i2c_deinit_count;
 static uint32_t atlas_test_i2c_init_count;
 static uint32_t atlas_test_i2c_analog_filter_count;
 static uint32_t atlas_test_i2c_digital_filter_count;
-static uint32_t atlas_test_i2c_deinit_while_bno_reset_count;
 
 /**
  * @brief Resolve a GPIO trace word for one mock port.
@@ -279,7 +278,6 @@ void AtlasTest_ResetI2cTrace(void)
     atlas_test_i2c_init_count = 0U;
     atlas_test_i2c_analog_filter_count = 0U;
     atlas_test_i2c_digital_filter_count = 0U;
-    atlas_test_i2c_deinit_while_bno_reset_count = 0U;
 }
 
 /** @brief Return host-observed I2C deinitialization calls. */
@@ -290,19 +288,12 @@ uint32_t AtlasTest_GetI2cInitCount(void) { return atlas_test_i2c_init_count; }
 uint32_t AtlasTest_GetI2cAnalogFilterCount(void) { return atlas_test_i2c_analog_filter_count; }
 /** @brief Return host-observed digital-filter configuration calls. */
 uint32_t AtlasTest_GetI2cDigitalFilterCount(void) { return atlas_test_i2c_digital_filter_count; }
-/** @brief Return I2C deinitializations performed while BNO085 reset was asserted. */
-uint32_t AtlasTest_GetI2cDeinitWhileBnoResetCount(void)
-{ return atlas_test_i2c_deinit_while_bno_reset_count; }
 
 /** @brief Accept and count an I2C deinitialization used for shared-bus recovery. */
 HAL_StatusTypeDef HAL_I2C_DeInit(I2C_HandleTypeDef *i2c)
 {
     (void)i2c;
     ++atlas_test_i2c_deinit_count;
-    if ((atlas_test_high_b & BNO085_NRST_Pin) == 0U)
-    {
-        ++atlas_test_i2c_deinit_while_bno_reset_count;
-    }
     return HAL_OK;
 }
 

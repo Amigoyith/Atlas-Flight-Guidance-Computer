@@ -178,7 +178,7 @@ From the repository root:
 1. Select **Refresh ports**, choose the Atlas application's COM port explicitly, then **Connect**. No port opens automatically. Only one terminal/dashboard may own it.
 2. Opening asserts CDC DTR and should produce a schema-1 `hello`: profile `bringup`, version `1.2.1` (or the verified installed diagnostic version), both `pwm_pyro_inhibited:true` and `led_inhibited:true`, device UID and nominal CPU 200 MHz. The updated dashboard rejects an older image that can still command RGB high. **Identify** requests the handshake again. Never proceed on an unrecognized profile. `hello`/`status` requests exercise both USB directions without probing sensors.
 3. The ordinary Bringup status stream is nominally 2 Hz. Firmware 1.5.0 initializes onboard sensors and radio automatically, then broadcasts read-only sensor snapshots about once per second. A separate USB remote record supports the browser's **Remote Atlas** tab. Analog/input monitoring also runs automatically. Allow sensor startup to finish before using ServoBench stabilization. Lack of GPS fix, a missing radio/card, and failed optional sensors are reported individually.
-4. Tick the power/load checklist only after the physical steps above. Buttons issue one operation at a time. ADXL, LSM, MMC, barometer, BNO, BLE and radio initialization are permitted **once per MCU boot**, including a failed attempt. Firmware 1.5.0 attempts all of these at boot except BLE; BLE remains an explicit test. GNSS is the sole retry exception: after a completed failure, another explicit click safely stops/flushes its UART and retries; if identity passed but RAM configuration failed, only configuration is retried. There is no automatic retry or replay.
+4. Tick the power/load checklist only after the physical steps above. Buttons issue one operation at a time. ADXL, LSM, MMC, barometer, BLE and radio initialization are permitted **once per MCU boot**, including a failed attempt. Firmware 1.5.0 attempts all of these at boot except BLE; BLE remains an explicit test. GNSS is the sole retry exception: after a completed failure, another explicit click safely stops/flushes its UART and retries; if identity passed but RAM configuration failed, only configuration is retried. There is no automatic retry or replay.
 5. In **Raw evidence & notes**, start a **new** log if desired. Logging never overwrites a file and stops at 100 MiB or a disk error. Logs include UID, UTC and GNSS position: keep them private and out of Git. Enter DMM, scope and peer observations as bench notes. Starting a log late does not recover earlier frames.
 
 The table distinguishes NOT TESTED, NO SAMPLES, RESPONDING, STALE, FAILED, transport initialization and reported GNSS fix. Read the actual command reply in the event log as well. “Transport initialized” for the external radio proves only that its MCU UART driver started. GPIO `outputs` are **commanded bits**, not measured connector voltages. SD “mounted” does not prove a successful write/readback. BLE AT identity does not prove RF communication.
@@ -225,9 +225,8 @@ Wait for each reply and continuing samples before proceeding. Leave the board st
 | LSM / `probe lsm` | Accel/gyro samples and INT1 counter increase; roughly 1 g at rest, gyro near its stationary bias, signed rate changes with deliberate rotation; record axes and temperature |
 | MMC / `probe mmc` | Field count increases; XYZ magnetic field changes with orientation, away from steel/tools/current loops. Values display in µT. This is not a hard/soft-iron calibration |
 | BARO / `probe baro` | PROM CRC/init OK; pressure/temperature update and are plausible against a local reference. Altitude/weather affect pressure; 101325 Pa is not a universal acceptance target. Do not blow liquid/moisture into the sensor |
-| BNO / `probe bno` | Version 1.0.2 retains the proven seven-bit `0x4A` (STM32 HAL `0x94`) and CEVA two-interrupt header/continuation correction. Identity and all four report enables must return OK; **each** accel, gyro, magnetic and quaternion count/timestamp must advance. Require `bno.health.io_errors=0`, `protocol_errors=0`, `pending_length` returning to zero, and continuing barometer samples. Check gravity, rate sign and quaternion norm near one. Accuracy status is separate from packet reception |
 
-Discrete sensor polling is deliberately slower than a flight acquisition design: ADXL/LSM nominal 5 ms, MMC 100 ms, barometer 200 ms, with latest-value publication. BNO requests 100/100/50/100 Hz reports. These are scheduling requests, not guaranteed lossless sample rates. One failed module remains reported while the diagnostic owner continues servicing others; a hung task still faults supervision.
+Discrete sensor polling is deliberately slower than a flight acquisition design: ADXL/LSM polled every 2 ms (so no 240 Hz LSM6 sample is skipped and the Fusion sample rate of 240 Hz holds), MMC 100 ms, barometer 200 ms, with latest-value publication. These are scheduling requests, not guaranteed lossless sample rates. One failed module remains reported while the diagnostic owner continues servicing others; a hung task still faults supervision.
 
 ### C. SD and RTC — explicit, non-destructive file-level test
 
@@ -289,7 +288,7 @@ After one fully completed failure, correct only safe wiring/power conditions and
 
 Check NAV frame count/timestamps first; **valid messages with no fix indoors still prove transport**. For navigation acceptance, move to a stationary clear-sky location while maintaining a safe grounded/powered setup. Require a continuing valid 3D fix (fix type 3 or 4 with flags bit 0 set), plausible satellite count/location/height and horizontal accuracy appropriate to your test. Compare coordinates with a known reference; a fixed number of satellites alone is insufficient.
 
-PPS is captured on PA15/TIM2 CH1. After at least two pulses, inspect the pulse count and period (nominally about 1,000,000 µs for a 1 Hz configuration) and compare to a scope. The first pulse has no meaningful interval. No PPS while no valid time/fix is not automatically a failed UART. Confirm GNSS and BNO continue together; neither may reset their shared TIM2 counter. GNSS boot configuration is RAM-only and is not saved automatically.
+PPS is captured on PA15/TIM2 CH1. After at least two pulses, inspect the pulse count and period (nominally about 1,000,000 µs for a 1 Hz configuration) and compare to a scope. The first pulse has no meaningful interval. No PPS while no valid time/fix is not automatically a failed UART. GNSS must not reset the shared TIM2 counter. GNSS boot configuration is RAM-only and is not saved automatically.
 
 ## 7. Later-stage logic fixtures and radio
 
@@ -354,7 +353,6 @@ After individual tests, run a supervised **10-minute initial soak** with the int
 | GUI says stale/blocked | Treat displayed measurements as historical; preserve log, inspect target status, reconnect manually. Do not repeat an uncertain write |
 | Probe returns STATE | An ordinary module already attempted this boot, GNSS already succeeded, wrong operating mode, or another state gate. A failed GNSS is retryable only in 1.0.2. Inspect `attempted`, `init`, version/handshake, pending ID and reply |
 | Sensor identity/I/O/CRC failure | Check its local supply, CS/reset/interrupt, bus pins/pulls, fitted part/address and waveform. Fix with power OFF; fresh boot before another probe |
-| BNO fails and barometer stops | Retain `bno.health` and barometer counters. Version 1.0.2 should hold U12 reset and increment `recovery_attempts`; require `recovery_failures=0` and fresh barometer samples afterward. If not, power down and scope I2C1 SCL/SDA plus H_INTN; do not repeatedly probe in one boot |
 | RGB field is not inhibited/zero | Stop using that image or power down on a nonzero pin readback. Version 1.0.2 must advertise the inhibit and never command PB6/PB7/PD14 high. Do not test around the confirmed Q6-Q8 defect |
 | `power.status` nonzero / no samples | Preserve `ref_stage/channel/raw/hal_status/hal_error`, `adc_errors`, reset/fault fields and DMM rails. Use the stage table in section 6A; do not alter scaling or enable outputs to work around an unqualified reference path |
 | SD not mounted / FatFs 13 | Check known FAT32 media; 13 is no recognized filesystem. No automatic format/recovery is performed |
@@ -384,7 +382,7 @@ Only send the next line after the previous reply; the snippet is not a batch scr
 | Verb (after ID) | Meaning |
 |---|---|
 | `hello`, `status` | Read-only identification/ack; full status is streamed periodically |
-| `probe adxl/lsm/mmc/baro/bno/gnss/ble/radio` | Choose one literal module name. Only a completed failed GNSS probe may be explicitly retried |
+| `probe adxl/lsm/mmc/baro/gnss/ble/radio` | Choose one literal module name. Only a completed failed GNSS probe may be explicitly retried |
 | `led 0`, `beep`, `stop` | Explicit RGB-low request; 200 ms nominal beep; stop buzzer and force RGB low. Nonzero LED masks are rejected |
 | `march` | Bringup 1.1.1+: play a fixed melody once without blocking sensor polling; `stop` cancels. Version 1.2.2+ uses the accepted 42-note / 16.5 s Preview C. See [melody controls](GROUND_STATION.md#play-the-buzzer-melody) |
 | `birthday` | Bringup/ServoBench 1.2.6+: play Happy Birthday once, 25 notes / 12 s; `stop` cancels. No overlap or replay queue |
@@ -405,9 +403,9 @@ Records are ASCII JSON + LF: `hello`, periodic `status`, ticketed `reply`, or ex
 
 Important fields:
 
-- `init[12]`: ADXL, LSM, MMC, barometer, BNO identity, BNO reports, GNSS identity, GNSS RAM config, BLE, radio transport, LED, buzzer. `attempted` bits 0–7 follow the eight `probe` names above. Before a probe, NOT_READY is expected.
-- `count/errors/sample_status[4]`: direct sensors ADXL/LSM/MMC/barometer. A retained value is valid evidence only with a successful sample count, acceptable status and age. `bno.count/t/accuracy[4]` refer to accel/gyro/magnetic/quaternion separately. `bno.health` exposes transfer counts/errors, retained HAL status/error/stage/length, pending continuation length, H_INTN level, initialization and shared-I2C recovery outcomes.
-- `adxl.mg`, `lsm.mg`: divide by 1000 for g. `lsm.mdps`: divide by 1000 for deg/s. `mmc.nt`, `bno.mag_nt`: divide by 1000 for µT. `bno.accel_mm_s2` / `gyro_mrad_s`: divide by 1000 for m/s² / rad/s. Quaternion `q_ppm` is **w,x,y,z** divided by 1,000,000. `temp_cc` is centi-°C; `baro.pa` is Pa.
+- `init[10]`: ADXL, LSM, MMC, barometer, GNSS identity, GNSS RAM config, BLE, radio transport, LED, buzzer. `attempted` bits 0–6 follow the seven `probe` names above. Before a probe, NOT_READY is expected.
+- `count/errors/sample_status[4]`: direct sensors ADXL/LSM/MMC/barometer. A retained value is valid evidence only with a successful sample count, acceptable status and age.
+- `adxl.mg`, `lsm.mg`: divide by 1000 for g. `lsm.mdps`: divide by 1000 for deg/s. `mmc.nt`: divide by 1000 for µT. `temp_cc` is centi-°C; `baro.pa` is Pa.
 - `gnss.lat_e7/lon_e7`: signed degrees ×10⁷; `h_msl_mm/hacc_mm`: millimetres. Interpret `fix`, `flags`, `sv`, `frames`, `t`, checksums and `pps_count/pps_us` together. `failure_stage/status`, `pps_started`, RX/TX/drop/error/restart/preflight/retry counts and HAL status/error diagnose startup. Coordinates are private test data.
 - `power.mv/raw/valid/count/t` and `vdda_mv/temp_c`: analog record described above. `ref_stage/channel/raw/hal_status/hal_error` retain the first ADC3 VREFINT/temperature failure; `adc_errors` counts the separate external ADC1/DMA path. `gpio.inputs/outputs` are bit masks; general outputs are commanded, not sensed. `led.inhibited` must be 1, `led.commanded` must be 0, and `led.gates` should be 0; this only samples the legacy MCU control nets. `gpio.pwm/armed` must remain zero.
 - `sd`: physical detect, mount/result/counters, RTC validity/calendar. `ble` / `radio`: identity/mode/byte counts and most recent raw chunk in hex. With `hello.radio_link=1`, radio also reports acknowledged tests, peer UID, RTT, monitoring, connection freshness and errors; raw bytes alone never imply an acknowledgement.
@@ -433,7 +431,6 @@ USB DFU → application CDC / Identify / reconnect evidence:
 ADC comparison / raw rank mapping / invalid-data behavior:
 RGB inhibit and all-three-low evidence / buzzer waveform / SW2:
 ADXL / LSM / MMC / MS5611: identities, counts, axes, reference checks:
-BNO: identity, all four streams, accuracy and quaternion checks:
 SD: detect / mount / 23-byte read / 1024-byte MCU compare / laptop compare:
 RTC UTC advancing / retention conditions:
 BLE: firmware / profile readback / SPS peer / both-direction payloads:

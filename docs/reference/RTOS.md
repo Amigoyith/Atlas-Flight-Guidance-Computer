@@ -44,11 +44,11 @@ Per-argument data tags are in the [RTOS](../../App/Inc/atlas_rtos.h), [policy](.
 
 ## Layers and startup
 
-Project-owned `App/` sits above generated HAL/pin/clock configuration. BNO085 uses the pinned CEVA SH-2/SHTP library through the Atlas I2C/reset/time adapter. FreeRTOS is manually integrated; do not generate a second kernel or CMSIS wrapper.
+Project-owned `App/` sits above generated HAL/pin/clock configuration. FreeRTOS is manually integrated; do not generate a second kernel or CMSIS wrapper.
 
-Before scheduling, startup forces the hardware-inhibited RGB nets low, initializes the buzzer, and in normal builds attempts four discrete sensors, BNO085 identity/four reports, GNSS identity/RAM configuration, RFD900x transport and BLE identity. Each stage has an `atlas_board.init` result; the first failure is the aggregate. No module settings are saved automatically.
+Before scheduling, startup forces the hardware-inhibited RGB nets low, initializes the buzzer, and in normal builds attempts four discrete sensors, GNSS identity/RAM configuration, RFD900x transport and BLE identity. Each stage has an `atlas_board.init` result; the first failure is the aggregate. No module settings are saved automatically.
 
-BNO085 and GNSS use `AtlasTime_StartCounter()` for TIM2. A running BUSY/CEN handle is accepted without restart or counter reset; a stopped BUSY handle is rejected. GNSS first aborts/flushes stale USART RX, arms reception with one bounded race retry, and proves `MON-VER` before starting channel-1 capture. BNO085 I2C traffic uses one newly asserted H_INTN per header/continuation phase; on a terminal transfer failure U12 is held reset before I2C1 and its filters are restored for the shared MS5611.
+GNSS uses `AtlasTime_StartCounter()` for TIM2. A running BUSY/CEN handle is accepted without restart or counter reset; a stopped BUSY handle is rejected. GNSS first aborts/flushes stale USART RX, arms reception with one bounded race retry, and proves `MON-VER` before starting channel-1 capture.
 
 `main()` starts IWDG1 after board probes. `AtlasRtos_Start()` validates priority group 4, creates static queues/tasks and initializes the output/ADC/expansion owners before starting FreeRTOS. SD media and USB enumeration occur later in their tasks. A failed board probe is retained and later faults supervision; failure to create required resources returns to fail-stop. Early failures before IWDG starts are not covered by that later watchdog.
 
@@ -74,12 +74,11 @@ SPI2 and I2C1 sensor operations, SPI3 IMU/external CS operations and UART mode/p
 
 | Path | Requested work | Baseline freshness |
 |---|---|---:|
-| Board service | UART recovery, BNO085 bounded edge-gated SHTP phases, GNSS parse and buzzer expiry each cycle | Errors latch |
+| Board service | UART recovery, GNSS parse and buzzer expiry each cycle | Errors latch |
 | ADXL375 | Due every 2 ms, device ODR 400 Hz | 50 ms |
 | LSM6DSV16B | Flight image: 480 Hz tagged FIFO drained every I/O cycle over SPI3 DMA (polled fallback); sensor-timestamped samples mapped to MCU µs into a 128-sample ring read by `AtlasRtos_ReadImuSamples()`. Bringup: coalesced INT1 or 5 ms fallback at 240 Hz | 50 ms |
 | MMC5983MA | Split-phase field conversion started every 10 ms and collected on a later cycle; conversion-midpoint µs timestamp, also queued in a 16-sample ring for `AtlasRtos_ReadMagSamples()` | 250 ms |
 | MS5611 | D2/D1 OSR1024 due every 100 ms | 500 ms |
-| BNO085 | Requested accel/gyro/magnetic/rotation at 100/100/50/100 Hz | 500 ms per report |
 | GNSS NAV-PVT | RAM-configured 10 Hz | 1000 ms |
 | PPS | TIM2 CH1 capture | Separate; not required for watchdog |
 | Radio/BLE RX | Up to 64 bytes per link per cycle in data mode | Drop counters; no peer guarantee |
@@ -95,7 +94,7 @@ The supervisor allows 2000 ms sensor startup grace and a bounded 1200 ms recover
 
 The sensor owner increments `sequence`, stamps publication time and copies its working snapshot under a short mutex. Readers see one coherent version, not simultaneous measurements. Never retain the hook's pointer.
 
-`valid_mask` means data has been received; check MCU timestamp, age, calibration and quality separately. BNO's SH-2 time has a different domain; use the `bno_*_received_at_ms` fields for HAL-age comparisons. NAV-PVT also needs fix/accuracy/UTC flag checks.
+`valid_mask` means data has been received; check MCU timestamp, age, calibration and quality separately. NAV-PVT also needs fix/accuracy/UTC flag checks.
 
 Each UART ISR produces its own 1024-byte ring with 1023 usable slots. The sensor owner consumes it and feeds RFD900x/BLE into separate static FreeRTOS streams with 1024 usable bytes. Reader mutexes serialize public consumers. Overflow discards new bytes with counters; flow control follows hardware, not application-ring occupancy. UART4 has its own expansion RX stream and diagnostics.
 

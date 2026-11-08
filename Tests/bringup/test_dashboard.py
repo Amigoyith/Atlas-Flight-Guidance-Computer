@@ -46,8 +46,6 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual([f['type'] for f in frames], ['hello', 'status', 'status', 'remote'])
         self.assertEqual(frames[2]['ble']['model'], '\x01' * 96)
         self.assertIn('nt', frames[2]['mmc'])
-        self.assertIn('mag_nt', frames[2]['bno'])
-        self.assertIn('health', frames[2]['bno'])
         self.assertIn('led', frames[2])
         remote=frames[3]['data']
         self.assertEqual(remote['lsm']['mg'][:2],[-1250,None])
@@ -75,10 +73,7 @@ class ProtocolTests(unittest.TestCase):
         for line in (b'[]\n', b'{"type":"hello","type":"status"}\n', b'{"type":NaN}\n', b'\xff\n'):
             self.assertEqual(decoder.feed(line), [])
         for path, value in ((('schema',), 2), (('schema',), True), (('profile',), 'normal'), (('gpio', 'pwm'), 1),
-                            (('power', 'mv'), [1]), (('bno', 'count'), [True] * 4),
-                            (('bno', 'health'), {'interrupts': 0}),
-                            (('bno', 'health', 'failure_stage'), 10),
-                            (('bno', 'health', 'intn_low'), 2), (('led', 'gates'), 8),
+                            (('power', 'mv'), [1]), (('led', 'gates'), 8),
                             (('led', 'inhibited'), 0), (('led', 'commanded'), 1),
                             (('gnss', 'failure_stage'), 11), (('gnss', 'hal_status'), 4),
                             (('power', 'ref_stage'), 10), (('power', 'ref_channel'), 2),
@@ -185,15 +180,14 @@ class ProtocolTests(unittest.TestCase):
         """@brief Freshness/units/fix flags are visible; no automatic hardware PASS."""
         frame = demo.status()
         rows = observations(validate(frame))
-        self.assertEqual(len(rows), 14)
+        self.assertEqual(len(rows), 10)
         self.assertIn('21.000', rows[2][3])
         self.assertIn('uT', rows[2][3])
-        self.assertIn('I2C reads/writes', rows[4][3])
-        self.assertIn('RGB firmware-inhibited', rows[13][3])
-        self.assertIn('UART RX/TX', rows[8][3])
-        self.assertIn('ADC3 none on temperature', rows[12][3])
-        self.assertIn('external ADC errors 0', rows[12][3])
-        self.assertEqual(rows[8][1], 'RESPONDING / NO 3D FIX')
+        self.assertIn('RGB firmware-inhibited', rows[9][3])
+        self.assertIn('UART RX/TX', rows[4][3])
+        self.assertIn('ADC3 none on temperature', rows[8][3])
+        self.assertIn('external ADC errors 0', rows[8][3])
+        self.assertEqual(rows[4][1], 'RESPONDING / NO 3D FIX')
         frame['adxl']['t'] = 0
         self.assertEqual(observations(frame)[0][1], 'STALE')
         frame['attempted'] = 0
@@ -202,8 +196,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_invalid_measurements_are_not_responding(self):
         """@brief Null/nonrepresentable measurements and unqualified ADC are not green."""
-        for section, key, row in (('adxl', 'mg', 0), ('lsm', 'mdps', 1), ('mmc', 'nt', 2),
-                                  ('bno', 'accel_mm_s2', 4), ('bno', 'q_ppm', 7)):
+        for section, key, row in (('adxl', 'mg', 0), ('lsm', 'mdps', 1), ('mmc', 'nt', 2)):
             frame = demo.status()
             frame[section][key][0] = None
             self.assertEqual(observations(validate(frame))[row][1], 'INVALID DATA')
@@ -213,9 +206,9 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(observations(validate(frame))[3][1], 'INVALID DATA')
         frame = demo.status()
         frame['power']['valid'] &= ~1
-        self.assertEqual(observations(validate(frame))[12][1], 'INVALID DATA')
+        self.assertEqual(observations(validate(frame))[8][1], 'INVALID DATA')
         frame['power']['available'] = False
-        self.assertEqual(observations(validate(frame))[13][1], 'UNAVAILABLE')
+        self.assertEqual(observations(validate(frame))[9][1], 'UNAVAILABLE')
 
     def test_fixture_preservation(self):
         """@brief Fixtures refuse overwrites and catch corruption/truncation/extra data."""

@@ -6,7 +6,7 @@
     const s=v.status, r=s?.radio;
     const supported=v.hello?.radio_link===1 && r?.connected!==undefined;
     const live=v.mode==='live' && usable && ((s.ms-s.owner_ms)>>>0)<=500;
-    const ready=live && supported && !!(s.attempted&128) && s.init[9]===0 && !r.command;
+    const ready=live && supported && !!(s.attempted&64) && s.init[7]===0 && !r.command;
     const connected=ready && r.connected===1 && r.ack_age_ms+((s.ms-s.owner_ms)>>>0)+(v.age_ms||0)<6000;
     const label=!live?'Status unavailable':!supported?'Firmware update required':!ready?'Transport unavailable':
       connected?'Connected · peer replied':r.waiting?'Checking connection…':r.monitoring&&r.timeouts?'No peer response':'Not connected';
@@ -35,10 +35,10 @@
     for(const id of ['radio-connect','radio-test','radio-stop']) document.getElementById(id).disabled=!m.enabled;
     document.getElementById('radio-connect').disabled||=!!r?.monitoring;
     document.getElementById('radio-stop').disabled||=!r?.monitoring && !r?.connected;
-    document.getElementById('radio-probe').disabled||=!!(s?.attempted&128);
+    document.getElementById('radio-probe').disabled||=!!(s?.attempted&64);
     document.getElementById('radio-identity').disabled||=!!r?.monitoring || !!v.remote?.streaming || !!s?.stabilization?.enabled || !!s?.gpio?.pwm;
     details('radio-details',[
-      ['Transport',m.live?(s.attempted&128?(s.init[9]?'Initialization failed':'Initialized'):'Not initialized'):'—'],
+      ['Transport',m.live?(s.attempted&64?(s.init[7]?'Initialization failed':'Initialized'):'Not initialized'):'—'],
       ['Serial format',m.supported?`${r.baud} baud · 8N1`:'Update both boards to firmware 1.4.0'],
       ['Monitoring',m.live&&m.supported?(r.monitoring?'Every 3 seconds':'Stopped; responds to peer tests'):'—'],
       ['Last responding Atlas',m.supported?uid(r.peer):'—'],

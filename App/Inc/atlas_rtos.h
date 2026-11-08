@@ -43,10 +43,6 @@ typedef enum
     ATLAS_RTOS_VALID_LSM6DSV16B             = (1UL << 1),
     ATLAS_RTOS_VALID_MMC5983MA              = (1UL << 2),
     ATLAS_RTOS_VALID_MS5611                 = (1UL << 3),
-    ATLAS_RTOS_VALID_BNO_ACCELEROMETER      = (1UL << 4),
-    ATLAS_RTOS_VALID_BNO_GYROSCOPE          = (1UL << 5),
-    ATLAS_RTOS_VALID_BNO_MAGNETOMETER       = (1UL << 6),
-    ATLAS_RTOS_VALID_BNO_ROTATION_VECTOR    = (1UL << 7),
     ATLAS_RTOS_VALID_GNSS_NAV_PVT           = (1UL << 8),
     ATLAS_RTOS_VALID_GNSS_PPS               = (1UL << 9)
 } AtlasRtosSnapshotValid;
@@ -55,8 +51,6 @@ typedef enum
 #define ATLAS_RTOS_REQUIRED_SENSOR_MASK \
     (ATLAS_RTOS_VALID_ADXL375 | ATLAS_RTOS_VALID_LSM6DSV16B | \
      ATLAS_RTOS_VALID_MMC5983MA | ATLAS_RTOS_VALID_MS5611 | \
-     ATLAS_RTOS_VALID_BNO_ACCELEROMETER | ATLAS_RTOS_VALID_BNO_GYROSCOPE | \
-     ATLAS_RTOS_VALID_BNO_MAGNETOMETER | ATLAS_RTOS_VALID_BNO_ROTATION_VECTOR | \
      ATLAS_RTOS_VALID_GNSS_NAV_PVT)
 
 /** @brief Coherent publication assembled exclusively by the I/O owner task. */
@@ -74,14 +68,6 @@ typedef struct
     AtlasLsm6dsv16bSample lsm6dsv16b;
     AtlasMmc5983maField mmc5983ma;
     AtlasMs5611Sample ms5611;
-    sh2_SensorValue_t bno_accelerometer;
-    sh2_SensorValue_t bno_gyroscope;
-    sh2_SensorValue_t bno_magnetometer;
-    sh2_SensorValue_t bno_rotation_vector;
-    uint32_t bno_accelerometer_received_at_ms;
-    uint32_t bno_gyroscope_received_at_ms;
-    uint32_t bno_magnetometer_received_at_ms;
-    uint32_t bno_rotation_vector_received_at_ms;
     AtlasGnssNavPvt gnss_nav_pvt;
     AtlasGnssPps gnss_pps;
     uint32_t sensor_recovery_until_ms;

@@ -20,7 +20,7 @@
     const sensor=(index,key)=>fresh&&!!(d.attempted&(1<<index))&&d.init[index]===0&&d.count[index]>0&&
       [0,4].includes(d.sample_status[index])&&recent(d[key].t,3000);
     const adc=fresh&&d.power.available&&d.power.status===0&&d.power.count>0&&recent(d.power.t,3000);
-    const gnss=fresh&&!!(d.attempted&32)&&d.init[6]===0&&d.init[7]===0&&d.gnss.frames>0&&recent(d.gnss.t,4000);
+    const gnss=fresh&&!!(d.attempted&16)&&d.init[4]===0&&d.init[5]===0&&d.gnss.frames>0&&recent(d.gnss.t,4000);
     const fix=gnss&&[3,4].includes(d.gnss.fix)&&!!(d.gnss.flags&1)&&Number.isFinite(d.gnss.lat_e7)&&
       Number.isFinite(d.gnss.lon_e7)&&Math.abs(d.gnss.lat_e7)<=900000000&&Math.abs(d.gnss.lon_e7)<=1800000000;
     return {r,d,supported,local,envelope,receivedAge,fresh,label,extra,ageAtCapture,recent,sensor,adc,gnss,fix,
@@ -58,10 +58,6 @@
         const ok=m.sensor(index,key),state=!m.fresh?'STALE':!(d.attempted&(1<<index))?'NOT STARTED':d.init[index]?statusNames[d.init[index]]:ok?'CURRENT':'NO FRESH SAMPLE';
         rows.push([label,state,`${m.ageAtCapture(d[key].t)} ms`,ok?value:'—']);
       }
-      for(const [i,label,field,scale,unit] of [[0,'BNO085 acceleration','accel_mm_s2',1000,'m/s²'],[1,'BNO085 angular rate','gyro_mrad_s',1000,'rad/s'],[2,'BNO085 magnetic field','mag_nt',1000,'µT'],[3,'BNO085 quaternion W/X/Y/Z','q_ppm',1e6,'']]){
-        const ok=m.fresh&&d.init[4]===0&&d.init[5]===0&&d.bno.count[i]>0&&m.recent(d.bno.t[i],3000);
-        rows.push([label,!m.fresh?'STALE':d.init[4]?statusNames[d.init[4]]:ok?'CURRENT · accuracy '+d.bno.accuracy[i]:'NO FRESH SAMPLE',`${m.ageAtCapture(d.bno.t[i])} ms`,ok?vector(d.bno[field],scale,unit):'—']);
-      }
     }
     $('remote-sensors').innerHTML=rows.length?rows.map(a=>'<tr>'+a.map(x=>'<td>'+esc(x)+'</td>').join('')+'</tr>').join(''):'<tr><td colspan="4">Waiting for a complete, checked remote snapshot.</td></tr>';
     const g=m.gnss?d.gnss:null;
@@ -88,7 +84,6 @@
       ['SD card / mounted',health?`${health.sd.card?'Present':'Absent'} / ${health.sd.mounted?'Yes':'No'}`:'—'],
       ['Power events / storage errors',health?`${health.power.power_events} / ${health.sd.errors}`:'—'],
       ['Direct sensor errors',health?health.errors.join(' / '):'—'],
-      ['BNO IO / protocol errors',health?`${health.bno.io_errors} / ${health.bno.protocol_errors}`:'—'],
       ['Reset flags',health?'0x'+health.power.reset_flags.toString(16).toUpperCase():'—']]);
     details('remote-transport',[
       ['Payload / received packet bytes',m.envelope?`${c.payload_bps} / ${c.rx_bps} B/s`:'—'],

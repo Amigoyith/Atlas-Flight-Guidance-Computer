@@ -14,7 +14,7 @@ def radio():
 class RadioTests(unittest.TestCase):
     def setUp(self):
         self.h,self.s=frames(); self.h['radio_link']=1; self.s['radio']=radio()
-        self.s['attempted']|=128; self.s['init'][9]=0
+        self.s['attempted']|=64; self.s['init'][7]=0
         self.station=gs.Station(); self.station.mode='live'; self.station.confirmed=True
         self.station.serial=Serial()
         self.station.ingest(validate(self.h),time.monotonic())

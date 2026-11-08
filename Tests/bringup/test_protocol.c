@@ -43,7 +43,6 @@ int main(void)
                            "10 probe lsm",
                            "11 probe mmc",
                            "12 probe baro",
-                           "13 probe bno",
                            "14 probe gnss",
                            "15 probe ble",
                            "16 probe radio",

@@ -4,7 +4,7 @@
  *
  * Major functions:
  * - AtlasTime_DelayMs(): yields the running RTOS task or uses HAL timing before startup.
- * - AtlasTime_StartCounter(): owns idempotent startup of the shared BNO/GNSS counter.
+ * - AtlasTime_StartCounter(): owns idempotent startup of the shared microsecond counter.
  * - AtlasTime_UseMicrosecondCounter()/NowUs(): expose that counter as the sample timebase.
  */
 

@@ -57,7 +57,7 @@ Startup proceeds as follows:
 2. Arm receive-to-idle. If bytes recreate an overrun in the short flush-to-arm window, repeat the entire preflight once; never retry indefinitely.
 3. Poll the side-effect-free `UBX-MON-VER` (`0A 04`) immediately, then every 250 ms within one bounded 3,000 ms identity window. This tolerates a receiver protocol engine that is still starting; only a checksum-valid response proves identity.
 4. Store printable software/hardware version fields; a missing version response is an identity failure.
-5. Start TIM2 input capture. Starting the shared timebase is idempotent: BNO085's running TIM2 is reused without resetting its count. Deferring PPS until after identity makes a communication failure safe to retry.
+5. Start TIM2 input capture. Starting the shared timebase is idempotent: an already-running TIM2 is reused without resetting its count. Deferring PPS until after identity makes a communication failure safe to retry.
 6. Send one version-0 `UBX-CFG-VALSET` to the RAM layer only.
 7. Require `UBX-ACK-ACK` whose payload matches class `0x06`, ID `0x8A`; a matching NAK fails configuration.
 8. Poll the same six keys from the RAM layer with version-0 `UBX-CFG-VALGET`.

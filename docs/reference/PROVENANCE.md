@@ -8,27 +8,24 @@ This reference combines import history and dependency policy. Current capability
 |---|---|---|
 | STM32 generator | STM32CubeMX 6.17.0; STM32Cube FW_H7 1.13.0 | `Atlas.ioc`, generated configuration, HAL/CMSIS, FatFs and USB middleware |
 | FreeRTOS Kernel | V10.6.2 from the locally installed STM32CubeH7 1.13.0 package; [upstream](https://github.com/FreeRTOS/FreeRTOS-Kernel) | [Kernel subset](../../ThirdParty/FreeRTOS-Kernel/README.md) |
-| CEVA SH-2/SHTP | [Upstream commit b514b1e2586ddc195e553dac89fc94c637b25298](https://github.com/ceva-dsp/sh2/tree/b514b1e2586ddc195e553dac89fc94c637b25298) | [BNO085 protocol library](../../ThirdParty/CEVA/sh2/README.md) |
 | Fusion AHRS | [Git submodule at upstream commit a8d7224f36a0ec82345ef49a3db50e65f8d3bab8](https://github.com/xioTechnologies/Fusion/tree/a8d7224f36a0ec82345ef49a3db50e65f8d3bab8) (MIT) | [Attitude estimator](../../ThirdParty/Fusion/README.md); only `FusionAhrs.c` is compiled |
 | Laptop bring-up transport | [pyserial 3.5 documentation](https://pyserial.readthedocs.io/en/latest/pyserial_api.html); pinned in [requirements](../../tools/bringup/requirements.txt) | Optional local Python virtual environment, not vendored or linked into MCU firmware; retain distribution notices |
 
 Fusion is a git submodule (`.gitmodules`); clone with `--recurse-submodules` or run `git submodule update --init`. Its [MIT license](../../ThirdParty/Fusion/LICENSE.md) is retained. [atlas_stabilization.c](../../App/Src/atlas_stabilization.c) feeds it gyro, in-range accelerometer and (pre-launch only) conditioned MMC5983MA samples, starts it at the measured up vector, and sets the sample period from each measured interval; the existing freshness, calibration and geometry logic is unchanged.
 
-FreeRTOS retains its [MIT license](../../ThirdParty/FreeRTOS-Kernel/LICENSE). CEVA retains Apache-2.0 notices in source headers and [NOTICE.txt](../../ThirdParty/CEVA/sh2/NOTICE.txt). Preserve all vendor notices and component-specific licenses; the repository has **no selected project-level license**.
+FreeRTOS retains its [MIT license](../../ThirdParty/FreeRTOS-Kernel/LICENSE). Preserve all vendor notices and component-specific licenses; the repository has **no selected project-level license**.
 
 The kernel subset includes `tasks.c`, `queue.c`, `list.c`, `stream_buffer.c`, public headers, and GNU/IAR Cortex-M7 r0p1 ports (IAR also uses `portasm.s`). It excludes heap implementations, CMSIS wrappers, software timers, event groups and co-routines. Project configuration is in [FreeRTOSConfig.h](../../App/Inc/FreeRTOSConfig.h), not the vendor tree. The selected M7 port contains the relevant port workaround; fitted silicon revision and errata still require physical confirmation.
 
-The CEVA adapter in [atlas_bno085.c](../../App/Src/atlas_bno085.c) supplies reset/open/close, bounded I2C SHTP reads/writes, interrupt deferral, product identity and microsecond timing. The pinned library includes `sh2`, `shtp`, `sh2_SensorValue`, `sh2_util`, `sh2_hal` and `sh2_err` sources/headers.
-
 ### Preserved baseline comparisons
 
-The preceding provenance review found that all 31 vendored kernel C/header/assembly files matched the installed package after **CRLF/LF normalization**; they were not byte-identical to that local package. Before the 2026-09-03 board follow-up, all 12 retained CEVA files were byte-identical to the clean local checkout at the pinned commit. The current tree intentionally changes only [`sh2.c`](../../ThirdParty/CEVA/sh2/sh2.c) in that set: `getProdIdOp` has a five-second timeout so a missing product-ID response cannot trap pre-scheduler initialization forever. The other 11 CEVA files remain at the pinned baseline. These checks establish source provenance, not correctness, security currency, or compatibility with untested hardware.
+The preceding provenance review found that all 31 vendored kernel C/header/assembly files matched the installed package after **CRLF/LF normalization**; they were not byte-identical to that local package. These checks establish source provenance, not correctness, security currency, or compatibility with untested hardware.
 
 All 19 entries in the [manufacturing SHA-256 manifest](../../hardware/manufacturing/SHA256SUMS.txt) matched. Hash agreement establishes preservation, not manufacturing correctness.
 
 ## Local integration changes (2026-09-02 through 2026-09-04)
 
-The correction work does not upgrade HAL/CMSIS, FreeRTOS, CEVA, FatFs or the USB library version. It carries these explicit, reviewable local USB middleware changes:
+The correction work does not upgrade HAL/CMSIS, FreeRTOS, FatFs or the USB library version. It carries these explicit, reviewable local USB middleware changes:
 
 | Vendor path | Local change and reason |
 |---|---|
@@ -38,7 +35,7 @@ The correction work does not upgrade HAL/CMSIS, FreeRTOS, CEVA, FatFs or the USB
 
 The patched files live in [`App/CubeOverrides`](../CUBEMX.md#overriding-a-generated-file) so CubeMX can regenerate the stock copies under `Middlewares/`; the build compiles the patched ones. These are Atlas single-CDC-profile fixes against the bundled source, not an upstream release or a general composite-class redesign. Preserve the ST license headers. [The real core/class regression test](../../Tests/services/test_usb_cdc.c) covers the corrected request/data paths. Reconcile each change explicitly on a vendor update; do not overwrite it with an unreviewed package refresh.
 
-The sole CEVA-source patch is the `getProdIdOp.timeout_us = 5000000` initializer described above. It does not change packet parsing or wire data. [`test_sh2_timeout.c`](../../Tests/host/test_sh2_timeout.c) compiles the actual pinned `sh2.c`, `shtp.c`, and `sh2_util.c` and proves a silent accepted request returns `SH2_ERR_TIMEOUT`. [`test_bno085_ceva.c`](../../Tests/host/test_bno085_ceva.c) runs the project adapter with the actual parser through reset, four product records and four feature writes; the focused mock additionally checks the held-LOW edge gate, maximum transfer, exact shifted address and reset-first shared-I2C recovery. Preserve the Apache-2.0 header and re-evaluate this small patch when advancing CEVA.
+The CEVA SH-2 library and BNO085 driver, previously vendored here, were removed; the BNO085 is not used for the up vector.
 
 Generated/project integration also changes: SD BSP/disk becomes polling and explicit-mount-generation-owned (including ST's disk initialization cache); USB PCD receives a dedicated EP2 TX FIFO and VBUS lifecycle; ADC/TIM6/PWM runtime overrides, fatal/ADC/ECC callbacks and DMA placement are maintained project contracts. The [regeneration instructions](../DEVELOPMENT.md#generated-code-and-dependencies) and [peripheral guide](../PERIPHERALS.md#verification-and-regeneration) list them.
 
@@ -48,7 +45,7 @@ The obsolete weak-callback SD host wrapper was retired after replacing the DMA c
 
 ### PCB bring-up additions
 
-The subsequent PCB bring-up work adds an isolated compile-time application, strict USB diagnostic protocol, desktop Tk dashboard, exclusive SD fixture test, offline image verifier and `Bringup` presets. It changes no vendor-library version or manufacturing file; the later bounded CEVA operation-table patch is disclosed above. Normal and diagnostic output gates are distinct; the bring-up protocol cannot enable PWM/pyro or save module configuration. The board's factory STM32 ROM handles DFU; no application bootloader binary was imported. Python/Tk and pyserial are laptop-side only; no web service or account is involved. See [startup](../startup.md) for use and [review evidence](../REVIEW_REPORT.md) for boundaries.
+The subsequent PCB bring-up work adds an isolated compile-time application, strict USB diagnostic protocol, desktop Tk dashboard, exclusive SD fixture test, offline image verifier and `Bringup` presets. It changes no vendor-library version or manufacturing file. Normal and diagnostic output gates are distinct; the bring-up protocol cannot enable PWM/pyro or save module configuration. The board's factory STM32 ROM handles DFU; no application bootloader binary was imported. Python/Tk and pyserial are laptop-side only; no web service or account is involved. See [startup](../startup.md) for use and [review evidence](../REVIEW_REPORT.md) for boundaries.
 
 ## Dependency updates
 
@@ -56,7 +53,7 @@ The subsequent PCB bring-up work adds an isolated compile-time application, stri
 2. Preserve licenses and record the precise file set/version. Do not silently modify vendor sources to hide an adapter defect; any necessary patch needs a minimal retained diff and upstream reference.
 3. Reconcile configuration explicitly. Do not enable a heap, second RTOS wrapper, timers or tickless idle as an incidental update.
 4. Rebuild GNU Debug/Release and IAR; review handler symbols, FPU/port choice, memory regions, stacks, compiler diagnostics and absence of unintended allocation.
-5. Repeat protocol and review probes plus affected inert bench tests. Kernel changes require scheduling/IRQ/overflow/stall/deadline/stack tests; CEVA changes require SHTP/reset/partial-transfer/report/recovery tests.
+5. Repeat protocol and review probes plus affected inert bench tests. Kernel changes require scheduling/IRQ/overflow/stall/deadline/stack tests.
 6. Update this reference, [Systems](../SYSTEMS.md), and the [current review report](../REVIEW_REPORT.md), retaining three distinct review passes for broad integration changes.
 
 ## Original import

@@ -70,7 +70,6 @@ if ($LASTEXITCODE -ne 0) { exit 2 }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -O2 -Wall -Wextra -Werror -DATLAS_BRINGUP=1 `
     -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
-    -I (Join-Path $bringupRoot 'ThirdParty/CEVA/sh2') `
     (Join-Path $bringupRoot 'Tests/bringup/test_console.c') `
     (Join-Path $bringupRoot 'Tests/services/service_model.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_bringup_protocol.c') `
@@ -104,7 +103,6 @@ if ($LASTEXITCODE -ne 0) { exit 2 }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & gcc -std=c11 -O2 -Wall -Wextra -Werror -DATLAS_BRINGUP=1 -DATLAS_SERVO_BENCH=1 `
     -I (Join-Path $bringupRoot 'Tests/services/mocks') -I (Join-Path $bringupRoot 'App/Inc') -I (Join-Path $bringupRoot 'ThirdParty/Fusion/Fusion') `
-    -I (Join-Path $bringupRoot 'ThirdParty/CEVA/sh2') `
     (Join-Path $bringupRoot 'Tests/bringup/test_console.c') `
     (Join-Path $bringupRoot 'Tests/services/service_model.c') `
     (Join-Path $bringupRoot 'App/Src/atlas_bringup_protocol.c') `

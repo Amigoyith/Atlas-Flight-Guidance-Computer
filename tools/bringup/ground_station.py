@@ -35,10 +35,6 @@ def simulated(ms: int) -> dict:
     cr, sr, cp, sp, cy, sy = (math.cos(roll / 2), math.sin(roll / 2),
                              math.cos(pitch / 2), math.sin(pitch / 2),
                              math.cos(yaw / 2), math.sin(yaw / 2))
-    s["bno"]["q_ppm"] = [round(v * 1e6) for v in
-                          (cr*cp*cy+sr*sp*sy, sr*cp*cy-cr*sp*sy,
-                           cr*sp*cy+sr*cp*sy, cr*cp*sy-sr*sp*cy)]
-    s["bno"]["accuracy"] = [3] * 4
     s["lsm"]["mg"] = [round(80*math.sin(t)), round(55*math.cos(t*.7)), round(1000+12*math.sin(t*2))]
     s["lsm"]["mdps"] = [round(2800*math.cos(t)), round(1700*math.sin(t)), 320]
     s["adxl"]["mg"] = list(s["lsm"]["mg"])
@@ -47,8 +43,8 @@ def simulated(ms: int) -> dict:
     s["gnss"].update(fix=3, flags=1, sv=17, hacc_mm=850, pps_count=ms//1000,
                      pps_us=1000000, lat_e7=round(341020000+300*math.sin(t/15)),
                      lon_e7=round(-1177110000+300*math.cos(t/15)), h_msl_mm=round(354000+300*math.sin(t/5)))
-    s["attempted"] = 255
-    s["init"][9] = 0
+    s["attempted"] = 127
+    s["init"][7] = 0
     s["radio"]["rx"] = ms//10
     s["radio"]["last_hex"] = "41544c41535f44454d4f"
     return s
@@ -348,7 +344,7 @@ class Station:
                 if self.session.pending or self.batch or self.session.blocked:
                     raise ValueError("An operation is pending or the session needs attention.")
                 mask = self.session.status["attempted"]
-                self.batch = [f"probe {name}" for i, name in enumerate(MODULES[:6]) if not mask & (1 << i)]
+                self.batch = [f"probe {name}" for i, name in enumerate(MODULES[:5]) if not mask & (1 << i)]
                 self.event("Requested onboard sensor sequence; each untested module is probed once.")
             elif action == "record":
                 if body.get("enabled") is True:

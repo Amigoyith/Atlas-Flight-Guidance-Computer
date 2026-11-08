@@ -429,7 +429,7 @@ int main(void)
     memset(published.radio_rx, 0xCD, 32U);
     for (unsigned i = 0; i < 4U; ++i)
     {
-        published.count[i] = published.errors[i] = published.bno_count[i] = UINT32_MAX;
+        published.count[i] = published.errors[i] = UINT32_MAX;
     }
     for (unsigned i = 0; i < 10U; ++i)
         test_io.analog.millivolts[i] = UINT32_MAX;

@@ -32,7 +32,7 @@
 #define ATLAS_IO_SERVO_MAX_MV (8550U)
 #define ATLAS_IO_SERVO_LAYOUT (1U) /* Rev-0.1 physical labels: right 1 .. left 8. */
 #define ATLAS_IO_SERVO_ADC_SAMPLES (16U)
-/** @brief Exclusively transferred peripheral handles; TIM2 remains shared by GNSS/BNO. */
+/** @brief Exclusively transferred peripheral handles; TIM2 remains shared by GNSS. */
 typedef struct
 {
     ADC_HandleTypeDef *adc_external, *adc_internal;

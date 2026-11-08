@@ -7,7 +7,7 @@
  * - AtlasBoard_Service(): performs bounded foreground protocol work and scheduled output work.
  * - AtlasBoard_LatchRuntimeFault(): preserves a task-detected failure for supervision.
  * - AtlasBoard_AllStartupStepsPassed(): summarizes the complete bring-up report.
- * - HAL GPIO/timer callbacks: route BNO085, LSM6, and GNSS PPS interrupts safely.
+ * - HAL GPIO/timer callbacks: route LSM6 and GNSS PPS interrupts safely.
  */
 
 #ifndef ATLAS_BOARD_H
@@ -18,7 +18,6 @@
 
 #include "atlas_adxl375.h"
 #include "atlas_ble.h"
-#include "atlas_bno085.h"
 #include "atlas_buzzer.h"
 #include "atlas_gnss.h"
 #include "atlas_led.h"
@@ -59,8 +58,6 @@ typedef struct
     AtlasStatus lsm6dsv16b;
     AtlasStatus mmc5983ma;
     AtlasStatus ms5611;
-    AtlasStatus bno085;
-    AtlasStatus bno085_default_reports;
     AtlasStatus gnss;
     AtlasStatus gnss_ram_configuration;
     AtlasStatus radio_transport;
@@ -71,7 +68,7 @@ typedef struct
 typedef enum
 {
     ATLAS_BOARD_ADXL = 0, ATLAS_BOARD_LSM, ATLAS_BOARD_MMC, ATLAS_BOARD_BARO,
-    ATLAS_BOARD_BNO, ATLAS_BOARD_GNSS, ATLAS_BOARD_BLE, ATLAS_BOARD_RADIO,
+    ATLAS_BOARD_GNSS, ATLAS_BOARD_BLE, ATLAS_BOARD_RADIO,
     ATLAS_BOARD_MODULE_COUNT
 } AtlasBoardModule;
 
@@ -83,7 +80,6 @@ typedef struct
     AtlasLsm6dsv16b lsm6dsv16b;
     AtlasMmc5983ma mmc5983ma;
     AtlasMs5611 ms5611;
-    AtlasBno085 bno085;
     AtlasGnss gnss;
     AtlasRfd900x radio;
     AtlasBle ble;
@@ -92,8 +88,6 @@ typedef struct
     AtlasUartTransport gnss_transport;
     AtlasUartTransport radio_transport;
     AtlasUartTransport ble_transport;
-    sh2_SensorValue_t bno085_latest[SH2_MAX_SENSOR_ID + 1U];
-    uint64_t bno085_available_mask;
     AtlasBoardInitReport init;
     AtlasStatus runtime_fault;
     uint32_t service_cycles;
@@ -142,21 +136,6 @@ void AtlasBoard_LatchRuntimeFault(AtlasBoard *board, AtlasStatus status);
  * @return true only when all report entries are ATLAS_OK.
  */
 bool AtlasBoard_AllStartupStepsPassed(const AtlasBoard *board);
-
-/**
- * @brief Copy the latest decoded BNO085 report for one SH-2 sensor ID.
- * @param board Initialized board instance.
- * @param sensor_id SH-2 sensor/report identifier.
- * @param sample Destination value.
- * @param consume true to clear the availability bit.
- * @return true when at least one report of this type has been received.
- * @note Foreground-only accessor paired with AtlasBoard_Service(), which is the
- *       only writer to the latest-sample cache.
- */
-bool AtlasBoard_GetBno085Sample(AtlasBoard *board,
-                                sh2_SensorId_t sensor_id,
-                                sh2_SensorValue_t *sample,
-                                bool consume);
 
 #ifdef __cplusplus
 }

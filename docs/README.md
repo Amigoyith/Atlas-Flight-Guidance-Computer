@@ -33,7 +33,6 @@ New collaborators normally need only **Quick start + Systems**. Bench operators 
 | [LSM6DSV16B IMU](reference/modules/LSM6DSV16B.md) | [NINA-B112 BLE](reference/modules/BLE.md) | [Differential buzzer](reference/modules/BUZZER.md) |
 | [MMC5983MA magnetometer](reference/modules/MMC5983MA.md) | [RFD900x radio — J9 “LoRa” label](reference/modules/RFD900X.md) | |
 | [MS5611 barometer](reference/modules/MS5611.md) | | |
-| [BNO085 sensor hub](reference/modules/BNO085.md) | | |
 
 SD, USB, ADC, PWM, GPIO, pyro and expansion now have owned services. Their commands, data units, result lifetime and qualification rules are centralized in [Peripheral services](PERIPHERALS.md). [Systems](SYSTEMS.md) distinguishes implementation from physical acceptance.
 
