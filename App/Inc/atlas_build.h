@@ -24,4 +24,9 @@
 #define ATLAS_BENCH_PROFILE "bringup"
 #endif
 #define ATLAS_BRINGUP_VERSION "1.5.0"
+/** @brief BNO085 use (CMake option ATLAS_USE_BNO085, default OFF). Off, it is never probed,
+ * sampled or required, so its absence cannot inhibit outputs or stop the watchdog refresh. */
+#ifndef ATLAS_USE_BNO085
+#define ATLAS_USE_BNO085 0
+#endif
 #endif

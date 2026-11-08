@@ -62,12 +62,17 @@ typedef struct
 {
     AtlasBoardInitReport init;
     AtlasRtosSnapshot sensors;
-    uint32_t attempted, published_ms, count[4], errors[4], bno_count[4];
+    uint32_t attempted, published_ms, count[4], errors[4];
+#if ATLAS_USE_BNO085
+    uint32_t bno_count[4];
+#endif
     AtlasGnssHealth gnss_health;
     AtlasUartTransportHealth gnss_transport_health;
     AtlasBleHealth ble_health;
+#if ATLAS_USE_BNO085
     AtlasBno085Health bno_health;
     uint32_t bno_pending_length, bno_intn_low, bno_initialized;
+#endif
     uint32_t led_commanded, led_gates, led_initialized, led_inhibited;
     uint32_t buzzer_playing, buzzer_note, buzzer_notes, buzzer_hz, buzzer_status, buzzer_track;
     uint32_t ble_received, radio_received;
@@ -280,11 +285,13 @@ static void bench_publish(void)
     working.gnss_health = bench_board->gnss.health;
     working.gnss_transport_health = bench_board->gnss_transport.health;
     working.ble_health = bench_board->ble.health;
+#if ATLAS_USE_BNO085
     working.bno_health = bench_board->bno085.health;
     working.bno_pending_length = bench_board->bno085.pending_transfer_length;
     working.bno_intn_low =
         HAL_GPIO_ReadPin(BNO085_H_INTN_GPIO_Port, BNO085_H_INTN_Pin) == GPIO_PIN_RESET ? 1U : 0U;
     working.bno_initialized = bench_board->bno085.initialized ? 1U : 0U;
+#endif
     working.led_commanded = (uint32_t)bench_board->led.color;
     working.led_gates = AtlasLed_ReadGateMask(&bench_board->led);
     working.led_initialized = bench_board->led.initialized ? 1U : 0U;
@@ -381,6 +388,7 @@ static void bench_sample(void)
             AtlasMs5611_Read(&bench_board->ms5611, ATLAS_MS5611_OSR_1024, &s->ms5611);
         bench_sample_result(3U, s->ms5611_status, true);
     }
+#if ATLAS_USE_BNO085
     const sh2_SensorId_t ids[] = {SH2_ACCELEROMETER, SH2_GYROSCOPE_CALIBRATED,
                                   SH2_MAGNETIC_FIELD_CALIBRATED, SH2_ROTATION_VECTOR};
     sh2_SensorValue_t *const values[] = {&s->bno_accelerometer, &s->bno_gyroscope,
@@ -394,6 +402,7 @@ static void bench_sample(void)
             *stamps[i] = HAL_GetTick();
             ++working.bno_count[i];
         }
+#endif
     (void)AtlasGnss_GetLatestNavPvt(&bench_board->gnss, &s->gnss_nav_pvt, true);
     (void)AtlasGnss_GetPps(&bench_board->gnss, &s->gnss_pps);
     uint8_t bytes[32];
@@ -453,7 +462,11 @@ static void bench_telemetry_begin(void)
         r->bno085_default_reports,r->gnss,r->gnss_ram_configuration,r->ble,r->radio_transport,r->led,r->buzzer};
     const AtlasStatus statuses[]={s->adxl375_status,s->lsm6dsv16b_status,s->mmc5983ma_status,s->ms5611_status};
     for(unsigned i=0;i<12U;++i)w[TM_INIT+i]=init[i];
-    for(unsigned i=0;i<4U;++i){w[TM_COUNT+i]=b->count[i];w[TM_ERRORS+i]=b->errors[i];w[TM_SAMPLE_STATUS+i]=statuses[i];w[TM_BNO_COUNT+i]=b->bno_count[i];}
+    for(unsigned i=0;i<4U;++i){w[TM_COUNT+i]=b->count[i];w[TM_ERRORS+i]=b->errors[i];w[TM_SAMPLE_STATUS+i]=statuses[i];
+#if ATLAS_USE_BNO085
+        w[TM_BNO_COUNT+i]=b->bno_count[i];
+#endif
+    }
     w[TM_TIME]=s->adxl375.timestamp_ms;w[TM_TIME+1]=s->lsm6dsv16b.timestamp_ms;
     w[TM_TIME+2]=s->mmc5983ma.timestamp_ms;w[TM_TIME+3]=s->ms5611.timestamp_ms;
     bench_tm_vector(w,TM_ADXL,s->adxl375.x_g,s->adxl375.y_g,s->adxl375.z_g,1000U);
@@ -463,6 +476,7 @@ static void bench_telemetry_begin(void)
     w[TM_LSM_TEMP]=bench_tm_scaled(lsm->temperature_c,100U);
     bench_tm_vector(w,TM_MMC,s->mmc5983ma.x_gauss,s->mmc5983ma.y_gauss,s->mmc5983ma.z_gauss,100000U);
     w[TM_BARO_PA]=(uint32_t)s->ms5611.pressure_pa;w[TM_BARO_TEMP]=(uint32_t)s->ms5611.temperature_centi_c;
+#if ATLAS_USE_BNO085
     w[TM_BNO_TIME]=s->bno_accelerometer_received_at_ms;w[TM_BNO_TIME+1]=s->bno_gyroscope_received_at_ms;
     w[TM_BNO_TIME+2]=s->bno_magnetometer_received_at_ms;w[TM_BNO_TIME+3]=s->bno_rotation_vector_received_at_ms;
     w[TM_BNO_ACCURACY]=s->bno_accelerometer.status|((uint32_t)s->bno_gyroscope.status<<8U)|
@@ -474,6 +488,10 @@ static void bench_telemetry_begin(void)
     w[TM_BNO_Q+1]=bench_tm_scaled(s->bno_rotation_vector.un.rotationVector.i,1000000U);
     w[TM_BNO_Q+2]=bench_tm_scaled(s->bno_rotation_vector.un.rotationVector.j,1000000U);
     w[TM_BNO_Q+3]=bench_tm_scaled(s->bno_rotation_vector.un.rotationVector.k,1000000U);
+#else
+    for(unsigned i=0;i<3U;++i)w[TM_BNO_ACCEL+i]=w[TM_BNO_GYRO+i]=w[TM_BNO_MAG+i]=UINT32_C(0x80000000);
+    for(unsigned i=0;i<4U;++i)w[TM_BNO_Q+i]=UINT32_C(0x80000000);
+#endif
     const AtlasGnssNavPvt *g=&s->gnss_nav_pvt;
     w[TM_GNSS_TIME]=g->received_at_ms;w[TM_GNSS_COUNT]=bench_board->gnss.health.nav_pvt_frames;
     w[TM_GNSS_FIX]=g->fix_type|((uint32_t)g->flags<<8U)|((uint32_t)g->satellites_used<<16U);
@@ -496,7 +514,9 @@ static void bench_telemetry_begin(void)
     for(unsigned i=0;i<4U;++i)w[TM_PWM+i]=io.commanded_pwm_us[2U*i]|((uint32_t)io.commanded_pwm_us[2U*i+1U]<<16U);
     w[TM_SD]=(uint32_t)sd.card_detected|((uint32_t)sd.mounted<<1U)|((uint32_t)sd.last_status<<8U);
     w[TM_SD_ERRORS]=sd.errors;w[TM_SERVICE]=s->board_service_status;
+#if ATLAS_USE_BNO085
     w[TM_BNO_IO]=bench_board->bno085.health.io_errors;w[TM_BNO_PROTOCOL]=bench_board->bno085.health.protocol_errors;
+#endif
     w[TM_GNSS_UART]=bench_board->gnss_transport.health.uart_errors;w[TM_GNSS_DROPPED]=bench_board->gnss_transport.health.dropped_bytes;
     w[TM_TX_PACKETS]=telemetry.view.stats.tx_packets;w[TM_STARTUP]=sensors_started?1U:0U;
     (void)AtlasTelemetry_Begin(&telemetry,w,HAL_GetTick());
@@ -507,7 +527,10 @@ static void bench_telemetry_begin(void)
 static void bench_sensor_startup(void)
 {
     const AtlasBoardModule modules[]={ATLAS_BOARD_ADXL,ATLAS_BOARD_MMC,ATLAS_BOARD_BARO,
-        ATLAS_BOARD_BNO,ATLAS_BOARD_GNSS,ATLAS_BOARD_LSM};
+#if ATLAS_USE_BNO085
+        ATLAS_BOARD_BNO,
+#endif
+        ATLAS_BOARD_GNSS,ATLAS_BOARD_LSM};
     for(unsigned i=0;i<sizeof(modules)/sizeof(modules[0]);++i){
         taskENTER_CRITICAL();worker_deadline=HAL_GetTick()+BENCH_OPERATION_MS;worker_busy=true;taskEXIT_CRITICAL();
         (void)AtlasBoard_ProbeModule(bench_board,modules[i]);
@@ -958,6 +981,12 @@ static void bench_status(void)
     AtlasBench_JsonRaw(&j, ",\"temp_cc\":");
     AtlasBench_JsonI32(&j, s->ms5611.temperature_centi_c);
     bench_field(&j, "t", s->ms5611.timestamp_ms);
+#if !ATLAS_USE_BNO085
+    /* BNO085 compiled out: the dashboard schema still expects the object; report it empty. */
+    AtlasBench_JsonRaw(&j, "},\"bno\":{\"count\":[0,0,0,0],\"t\":[0,0,0,0],\"accuracy\":[0,0,0,0],"
+        "\"accel_mm_s2\":[null,null,null],\"gyro_mrad_s\":[null,null,null],\"mag_nt\":[null,null,null],"
+        "\"q_ppm\":[null,null,null,null]");
+#else
     AtlasBench_JsonRaw(&j, "},\"bno\":{\"count\":[");
     for (unsigned i = 0U; i < 4U; ++i)
     {
@@ -1017,8 +1046,10 @@ static void bench_status(void)
     bench_field(&j, "pending_length", b->bno_pending_length);
     bench_field(&j, "intn_low", b->bno_intn_low);
     bench_field(&j, "initialized", b->bno_initialized);
+    AtlasBench_JsonRaw(&j, "}");
+#endif
     const AtlasGnssNavPvt *g = &s->gnss_nav_pvt;
-    AtlasBench_JsonRaw(&j, "}},\"gnss\":{\"version\":");
+    AtlasBench_JsonRaw(&j, "},\"gnss\":{\"version\":");
     AtlasBench_JsonString(&j, b->gnss_version, sizeof(b->gnss_version));
     bench_field(&j, "t", g->received_at_ms);
     bench_field(&j, "frames", b->gnss_health.nav_pvt_frames);

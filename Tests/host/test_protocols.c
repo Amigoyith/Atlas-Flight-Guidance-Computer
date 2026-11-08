@@ -1264,6 +1264,29 @@ static void test_rtos_supervisor_policy(void)
     CHECK(AtlasRtosPolicy_EvaluateSupervisor(&input) ==
           ATLAS_RTOS_FAULT_STACK_MARGIN);
     CHECK(AtlasRtosPolicy_EvaluateSupervisor(NULL) == ATLAS_RTOS_FAULT_ASSERT);
+
+    /* Watchdog liveness: health problems (startup, service, sampling, stale sensors) never
+     * stop the refresh; stalled tasks, overrun maintenance and stack exhaustion still do. */
+    input.minimum_stack_free_words = 64U;
+    input.startup_status = ATLAS_ERROR_IDENTITY;
+    input.service_status = ATLAS_ERROR_IO;
+    input.sampling_status = ATLAS_ERROR_TIMEOUT;
+    input.sensors_fresh = false;
+    CHECK(AtlasRtosPolicy_EvaluateLiveness(&input) == ATLAS_RTOS_FAULT_NONE);
+    CHECK(AtlasRtosPolicy_EvaluateSupervisor(&input) == ATLAS_RTOS_FAULT_STARTUP);
+    input.previous_io_heartbeat = input.io_heartbeat;
+    CHECK(AtlasRtosPolicy_EvaluateLiveness(&input) == ATLAS_RTOS_FAULT_IO_STALLED);
+    input.previous_io_heartbeat = 9U;
+    input.previous_application_heartbeat = input.application_heartbeat;
+    CHECK(AtlasRtosPolicy_EvaluateLiveness(&input) == ATLAS_RTOS_FAULT_APPLICATION_STALLED);
+    input.previous_application_heartbeat = 4U;
+    input.io_busy = true;
+    input.io_busy_until_ms = 1000U;
+    CHECK(AtlasRtosPolicy_EvaluateLiveness(&input) == ATLAS_RTOS_FAULT_IO_DEADLINE);
+    input.io_busy = false;
+    input.supervisor_stack_free_words = 10U;
+    CHECK(AtlasRtosPolicy_EvaluateLiveness(&input) == ATLAS_RTOS_FAULT_STACK_MARGIN);
+    CHECK(AtlasRtosPolicy_EvaluateLiveness(NULL) == ATLAS_RTOS_FAULT_ASSERT);
 }
 
 /**

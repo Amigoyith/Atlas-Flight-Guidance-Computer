@@ -177,20 +177,10 @@ static bool atlas_rtos_task_context(void)
 }
 
 /**
- * @brief Preserve the first failing status in an aggregate.
- * @param aggregate Current aggregate status.
- * @param candidate New status.
- * @return candidate only when it is the first failure.
- */
-static AtlasStatus atlas_rtos_accumulate(AtlasStatus aggregate,
-                                          AtlasStatus candidate)
-{
-    return ((aggregate == ATLAS_OK) && (candidate != ATLAS_OK)) ?
-           candidate : aggregate;
-}
-
-/**
- * @brief Update the latched sampling status and board runtime fault.
+ * @brief Count a sensor transaction failure. A failed read leaves the previous sample in
+ *        place, so it ages; outputs pause through the freshness gate until the sensor
+ *        recovers. Nothing is latched, so one bus glitch cannot end the flight's outputs,
+ *        stop telemetry or reset the board.
  * @param status Current sensor transaction result.
  */
 static void atlas_rtos_record_sampling_failure(AtlasStatus status)
@@ -201,12 +191,10 @@ static void atlas_rtos_record_sampling_failure(AtlasStatus status)
     }
     if (xSemaphoreTake(atlas_rtos.health_mutex, portMAX_DELAY) == pdTRUE)
     {
-        atlas_rtos.health.sampling_status =
-            atlas_rtos_accumulate(atlas_rtos.health.sampling_status, status);
+        atlas_rtos.health.sampling_status = status;
+        ++atlas_rtos.health.sampling_errors;
         xSemaphoreGive(atlas_rtos.health_mutex);
     }
-    AtlasBoard_LatchRuntimeFault(atlas_rtos.board, status);
-    AtlasRtos_InhibitOutputs();
 }
 
 /** @brief Earliest sample expiry for the lock-free output gate; no startup grace.
@@ -218,13 +206,19 @@ static uint32_t atlas_rtos_output_expiry(const AtlasRtosSnapshot *snapshot, uint
         snapshot->maintenance_active || snapshot->sensor_recovery_active) return now_ms;
     const uint32_t stamps[] = {snapshot->adxl375.timestamp_ms, snapshot->lsm6dsv16b.timestamp_ms,
         snapshot->mmc5983ma.timestamp_ms, snapshot->ms5611.timestamp_ms,
+#if ATLAS_USE_BNO085
         snapshot->bno_accelerometer_received_at_ms, snapshot->bno_gyroscope_received_at_ms,
         snapshot->bno_magnetometer_received_at_ms, snapshot->bno_rotation_vector_received_at_ms,
-        snapshot->gnss_nav_pvt.received_at_ms};
+#endif
+    };
     const uint32_t limits[] = {ATLAS_RTOS_ADXL_MAX_AGE_MS, ATLAS_RTOS_LSM_MAX_AGE_MS,
         ATLAS_RTOS_MMC_MAX_AGE_MS, ATLAS_RTOS_MS5611_MAX_AGE_MS,
+#if ATLAS_USE_BNO085
         ATLAS_RTOS_BNO_MAX_AGE_MS, ATLAS_RTOS_BNO_MAX_AGE_MS,
-        ATLAS_RTOS_BNO_MAX_AGE_MS, ATLAS_RTOS_BNO_MAX_AGE_MS, ATLAS_RTOS_GNSS_MAX_AGE_MS};
+        ATLAS_RTOS_BNO_MAX_AGE_MS, ATLAS_RTOS_BNO_MAX_AGE_MS,
+#endif
+    };
+    _Static_assert(sizeof(stamps) == sizeof(limits), "One limit per freshness stamp");
     uint32_t remaining = UINT32_MAX;
     for (uint32_t i = 0; i < sizeof(stamps) / sizeof(stamps[0]); ++i)
     {
@@ -269,6 +263,7 @@ static void atlas_rtos_publish_snapshot(uint32_t now_ms)
 static void atlas_rtos_capture_protocol_samples(void)
 {
     AtlasBoard *board = atlas_rtos.board;
+#if ATLAS_USE_BNO085
     const uint32_t now_ms = HAL_GetTick();
 
     if (AtlasBoard_GetBno085Sample(board, SH2_ACCELEROMETER,
@@ -299,6 +294,7 @@ static void atlas_rtos_capture_protocol_samples(void)
         atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_BNO_ROTATION_VECTOR;
         atlas_rtos.working_snapshot.bno_rotation_vector_received_at_ms = now_ms;
     }
+#endif
     if (AtlasGnss_GetLatestNavPvt(&board->gnss,
                                   &atlas_rtos.working_snapshot.gnss_nav_pvt,
                                   true))
@@ -356,6 +352,7 @@ static uint32_t atlas_rtos_stale_sensor_mask(const AtlasRtosSnapshot *snapshot,
     {
         stale_mask |= ATLAS_RTOS_VALID_MS5611;
     }
+#if ATLAS_USE_BNO085
     if (!AtlasRtosPolicy_TimestampFresh(
             now_ms, snapshot->bno_accelerometer_received_at_ms,
             ATLAS_RTOS_BNO_MAX_AGE_MS))
@@ -380,6 +377,7 @@ static uint32_t atlas_rtos_stale_sensor_mask(const AtlasRtosSnapshot *snapshot,
     {
         stale_mask |= ATLAS_RTOS_VALID_BNO_ROTATION_VECTOR;
     }
+#endif
     if (!AtlasRtosPolicy_TimestampFresh(now_ms,
                                         snapshot->gnss_nav_pvt.received_at_ms,
                                         ATLAS_RTOS_GNSS_MAX_AGE_MS))
@@ -826,12 +824,11 @@ static bool atlas_rtos_service_command(bool *maintenance)
     memset(&atlas_rtos.pending_reply, 0, sizeof(atlas_rtos.pending_reply));
     if (xSemaphoreTake(atlas_rtos.health_mutex, portMAX_DELAY) == pdTRUE)
     {
+        /* Radio telemetry must keep working through sensor or GNSS trouble and after a
+         * module failed at startup; only a liveness fault (board about to reset) stops it. */
         command_allowed =
             (atlas_rtos.health.state == ATLAS_RTOS_STATE_RUNNING) &&
-            (atlas_rtos.health.fault == ATLAS_RTOS_FAULT_NONE) &&
-            (atlas_rtos.health.startup_status == ATLAS_OK) &&
-            (atlas_rtos.health.service_status == ATLAS_OK) &&
-            (atlas_rtos.health.sampling_status == ATLAS_OK);
+            (atlas_rtos.health.fault == ATLAS_RTOS_FAULT_NONE);
         xSemaphoreGive(atlas_rtos.health_mutex);
     }
 
@@ -948,8 +945,8 @@ static void atlas_rtos_io_task(void *argument)
         bool slow_sample = false;
         bool maintenance_cycle = false;
         bool command_cycle = false;
+        /* GNSS/radio/BLE UART errors are counted only: none of them is flight-critical. */
         AtlasStatus service_status = AtlasBoard_Service(atlas_rtos.board);
-        if (service_status != ATLAS_OK) AtlasRtos_InhibitOutputs();
         const bool lsm_interrupt =
             AtlasLsm6dsv16b_ConsumeInterrupt(&atlas_rtos.board->lsm6dsv16b);
 
@@ -957,8 +954,8 @@ static void atlas_rtos_io_task(void *argument)
         atlas_rtos.working_snapshot.board_service_status = service_status;
         if (xSemaphoreTake(atlas_rtos.health_mutex, portMAX_DELAY) == pdTRUE)
         {
-            atlas_rtos.health.service_status =
-                atlas_rtos_accumulate(atlas_rtos.health.service_status, service_status);
+            atlas_rtos.health.service_status = service_status;
+            if (service_status != ATLAS_OK) ++atlas_rtos.health.service_errors;
             xSemaphoreGive(atlas_rtos.health_mutex);
         }
 
@@ -1001,16 +998,12 @@ static void atlas_rtos_io_task(void *argument)
         {
             ++atlas_rtos.health.io_heartbeat;
             atlas_rtos_update_stream_health();
+            /* A slow cycle is counted, not fatal: sample freshness already gates outputs,
+             * and a real stall is caught by the supervisor's heartbeat check. */
             if (!maintenance_cycle && (uint32_t)(HAL_GetTick() - cycle_start_ms) >=
                 ATLAS_RTOS_IO_CYCLE_DEADLINE_MS)
             {
                 ++atlas_rtos.health.io_deadline_misses;
-                if (atlas_rtos.health.fault == ATLAS_RTOS_FAULT_NONE)
-                {
-                    atlas_rtos.health.fault = ATLAS_RTOS_FAULT_IO_DEADLINE;
-                    atlas_rtos.health.state = ATLAS_RTOS_STATE_FAULTED;
-                }
-                AtlasRtos_InhibitOutputs();
             }
             xSemaphoreGive(atlas_rtos.health_mutex);
         }
@@ -1037,17 +1030,20 @@ static void atlas_rtos_application_task(void *argument)
         const uint32_t lateness = (uint32_t)(xTaskGetTickCount() - released_at);
         bool late = AtlasRtosPolicy_ResponseLate(xTaskGetTickCount(), released_at, period);
         bool copied = false;
-        if (late) AtlasRtos_InhibitOutputs();
+        /* A late cycle skips (or finishes) one step and is counted. It does not latch a fault
+         * or inhibit outputs: the canards keep the last command for one more 10 ms period,
+         * and a task that stops for good is caught by the supervisor's heartbeat check. */
         if (!late) copied = AtlasRtos_GetSnapshot(&snapshot, ATLAS_RTOS_MAX_QUEUE_WAIT_MS);
-        if (copied && AtlasRtos_OutputsPermitted() && !snapshot.maintenance_active &&
-            !snapshot.sensor_recovery_active)
+        /* The hook runs even while outputs are inhibited, so flight-phase tracking and state
+         * estimation never pause. The I/O owner independently rejects every output command
+         * unless AtlasRtos_OutputsPermitted(). */
+        if (copied && !snapshot.maintenance_active && !snapshot.sensor_recovery_active)
         {
             /* Snapshot-mutex wait also consumes the scheduled response budget. */
             if (!AtlasRtosPolicy_ResponseLate(xTaskGetTickCount(), released_at, period))
                 AtlasRtos_ApplicationStep(&snapshot, HAL_GetTick());
         }
         late = late || AtlasRtosPolicy_ResponseLate(xTaskGetTickCount(), released_at, period);
-        if (late) AtlasRtos_InhibitOutputs();
         if (xSemaphoreTake(atlas_rtos.health_mutex, portMAX_DELAY) == pdTRUE)
         {
             if (copied) ++atlas_rtos.health.application_heartbeat;
@@ -1057,11 +1053,6 @@ static void atlas_rtos_application_task(void *argument)
             {
                 ++atlas_rtos.health.application_deadline_misses;
                 ++atlas_rtos.health.application_resynchronizations;
-                if (atlas_rtos.health.fault == ATLAS_RTOS_FAULT_NONE)
-                {
-                    atlas_rtos.health.fault = ATLAS_RTOS_FAULT_APPLICATION_DEADLINE;
-                    atlas_rtos.health.state = ATLAS_RTOS_STATE_FAULTED;
-                }
                 /* Skip missed releases; never issue a burst of catch-up control steps. */
                 previous_wake = xTaskGetTickCount();
             }
@@ -1142,15 +1133,16 @@ static void atlas_rtos_supervisor_task(void *argument)
         input.now_ms = HAL_GetTick();
         stale_sensor_mask = atlas_rtos_stale_sensor_mask(&snapshot, input.now_ms);
         input.sensors_fresh = stale_sensor_mask == 0U;
+
+        /* 1. Watchdog: refreshed whenever the software is alive, so a reset happens only
+         *    for a genuine hang (stalled task, stack exhaustion, assert). Sensor, GNSS,
+         *    radio, startup and output-health problems never reset the board in flight. */
         fault = (latched_fault == ATLAS_RTOS_FAULT_NONE) ?
-                AtlasRtosPolicy_EvaluateSupervisor(&input) : latched_fault;
+                AtlasRtosPolicy_EvaluateLiveness(&input) : latched_fault;
         if (fault == ATLAS_RTOS_FAULT_NONE &&
-            (!output_available || output.status != ATLAS_OK || output.emergency_latched ||
-             output.heartbeat == previous_output_heartbeat ||
-             (uint32_t)(input.now_ms - output.published_at_ms) > 25U ||
-             (uint32_t)(input.now_ms - output.analog.sampled_at_ms) > ATLAS_PYRO_MAX_SAMPLE_AGE_MS ||
-             (output.analog.valid_mask & 1U) == 0U))
-            fault = ATLAS_RTOS_FAULT_OUTPUT_SERVICE;
+            (!output_available || output.heartbeat == previous_output_heartbeat ||
+             (uint32_t)(input.now_ms - output.published_at_ms) > 25U))
+            fault = ATLAS_RTOS_FAULT_OUTPUT_SERVICE; /* Output task stalled. */
         if (fault == ATLAS_RTOS_FAULT_NONE && output.stack_free_words < ATLAS_RTOS_MIN_STACK_FREE_WORDS)
             fault = ATLAS_RTOS_FAULT_STACK_MARGIN;
         previous_output_heartbeat = output.heartbeat;
@@ -1162,6 +1154,27 @@ static void atlas_rtos_supervisor_task(void *argument)
             }
         }
 
+        /* 2. Outputs: permitted only while everything is healthy right now. These checks
+         *    are re-evaluated every cycle and never latched. Startup counts only the
+         *    flight-critical sensors; service and sampling errors show up as staleness. */
+        AtlasRtosFault blocked = fault;
+        if (blocked == ATLAS_RTOS_FAULT_NONE)
+        {
+            const AtlasBoardInitReport *r = &atlas_rtos.board->init;
+            AtlasRtosSupervisorInput health = input;
+            health.startup_status = (r->adxl375 == ATLAS_OK && r->lsm6dsv16b == ATLAS_OK &&
+                                     r->mmc5983ma == ATLAS_OK && r->ms5611 == ATLAS_OK) ?
+                                    ATLAS_OK : ATLAS_ERROR_NOT_READY;
+            health.service_status = ATLAS_OK;
+            health.sampling_status = ATLAS_OK;
+            blocked = AtlasRtosPolicy_EvaluateSupervisor(&health);
+        }
+        if (blocked == ATLAS_RTOS_FAULT_NONE &&
+            (output.status != ATLAS_OK || output.emergency_latched ||
+             (uint32_t)(input.now_ms - output.analog.sampled_at_ms) > ATLAS_PYRO_MAX_SAMPLE_AGE_MS ||
+             (output.analog.valid_mask & 1U) == 0U))
+            blocked = ATLAS_RTOS_FAULT_OUTPUT_SERVICE;
+
         if (xSemaphoreTake(atlas_rtos.health_mutex, portMAX_DELAY) == pdTRUE)
         {
             if (fault == ATLAS_RTOS_FAULT_NONE)
@@ -1171,18 +1184,16 @@ static void atlas_rtos_supervisor_task(void *argument)
             else if (atlas_rtos.health.fault == ATLAS_RTOS_FAULT_NONE)
             {
                 atlas_rtos.health.fault = fault;
-                if (fault == ATLAS_RTOS_FAULT_SENSOR_STALE)
-                {
-                    atlas_rtos.health.stale_sensor_mask = stale_sensor_mask;
-                }
                 atlas_rtos.health.state = ATLAS_RTOS_STATE_FAULTED;
             }
+            atlas_rtos.health.output_block = blocked;
+            atlas_rtos.health.stale_sensor_mask = stale_sensor_mask;
             xSemaphoreGive(atlas_rtos.health_mutex);
         }
         previous_io_heartbeat = input.io_heartbeat;
         previous_application_heartbeat = input.application_heartbeat;
         if (fault != ATLAS_RTOS_FAULT_NONE) AtlasRtos_InhibitOutputs();
-        atlas_outputs_permitted = fault == ATLAS_RTOS_FAULT_NONE && !atlas_output_fault &&
+        atlas_outputs_permitted = blocked == ATLAS_RTOS_FAULT_NONE && !atlas_output_fault &&
             (uint32_t)(input.now_ms - atlas_rtos.started_at_ms) >= ATLAS_RTOS_SENSOR_STARTUP_GRACE_MS &&
             !atlas_maintenance_hold && !snapshot.maintenance_active &&
             !snapshot.sensor_recovery_active &&

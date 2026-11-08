@@ -74,13 +74,13 @@ SPI2 and I2C1 sensor operations, SPI3 IMU/external CS operations and UART mode/p
 
 | Path | Requested work | Baseline freshness |
 |---|---|---:|
-| Board service | UART recovery, BNO085 bounded edge-gated SHTP phases, GNSS parse and buzzer expiry each cycle | Errors latch |
+| Board service | UART recovery, GNSS parse and buzzer expiry each cycle (BNO085 only with `ATLAS_USE_BNO085`) | Errors counted, not latched |
 | ADXL375 | Due every 2 ms, device ODR 400 Hz | 50 ms |
 | LSM6DSV16B | Flight image: 480 Hz tagged FIFO drained every I/O cycle over SPI3 DMA (polled fallback); sensor-timestamped samples mapped to MCU µs into a 128-sample ring read by `AtlasRtos_ReadImuSamples()`. Bringup: coalesced INT1 or 5 ms fallback at 240 Hz | 50 ms |
 | MMC5983MA | Split-phase field conversion started every 10 ms and collected on a later cycle; conversion-midpoint µs timestamp, also queued in a 16-sample ring for `AtlasRtos_ReadMagSamples()` | 250 ms |
 | MS5611 | D2/D1 OSR1024 due every 100 ms | 500 ms |
-| BNO085 | Requested accel/gyro/magnetic/rotation at 100/100/50/100 Hz | 500 ms per report |
-| GNSS NAV-PVT | RAM-configured 10 Hz | 1000 ms |
+| BNO085 | Compiled out by default; with `ATLAS_USE_BNO085`, accel/gyro/magnetic/rotation at 100/100/50/100 Hz | 500 ms per report (only when enabled) |
+| GNSS NAV-PVT | RAM-configured 10 Hz | Reported only; not required |
 | PPS | TIM2 CH1 capture | Separate; not required for watchdog |
 | Radio/BLE RX | Up to 64 bytes per link per cycle in data mode | Drop counters; no peer guarantee |
 | ADC / output owner | Completed ADC1 scans, periodic separate VREF/temperature | 50 ms ADC / 250 ms VREF |
@@ -146,9 +146,9 @@ Peripheral ISRs use no FreeRTOS API. SPI3 DMA completion/error callbacks only se
 
 ## Watchdog and deadline coverage
 
-Only the supervisor refreshes IWDG. Its 100 ms decision checks startup/service/sample status, required freshness, changed I/O/control/output heartbeats, output publication/ADC age, stacks, latched faults and refresh success. Nominal prescaler 64/reload 999 gives about two seconds at 32 kHz LSI; actual tolerance is unmeasured.
+Only the supervisor refreshes IWDG, and only **software liveness** decides it (`AtlasRtosPolicy_EvaluateLiveness()`): changed I/O/control/output heartbeats, output-task publication age, an in-deadline long operation, stack margins, latched liveness faults and refresh success. Startup results, board-service and sensor-transaction errors, sensor freshness, GNSS and output health never stop the refresh, so they cannot reset the board in flight. They are evaluated separately every 100 ms for output permission only (`AtlasRtosPolicy_EvaluateSupervisor()`), never latched, and reported as `AtlasRtosHealth.output_block`. Startup counts only the flight-critical ADXL375, LSM6DSV16B, MMC5983MA and MS5611. Nominal prescaler 64/reload 999 gives about two seconds at 32 kHz LSI; actual tolerance is unmeasured.
 
-The control response deadline is measured from the **scheduled** release: dispatch latency, snapshot wait and hook all consume the 10 ms budget. Late releases skip the hook; late completion inhibits outputs and latches a fault. Missed releases resynchronize instead of running a catch-up burst. A non-maintenance I/O cycle at least 20 ms also inhibits outputs and latches its deadline fault.
+The control response deadline is measured from the **scheduled** release: dispatch latency, snapshot wait and hook all consume the 10 ms budget. Late releases skip the hook; late completion permanently inhibits outputs for the boot (no reset). Missed releases resynchronize instead of running a catch-up burst. A non-maintenance I/O cycle of at least 20 ms is counted in `io_deadline_misses`; a genuinely stalled I/O task is caught by the heartbeat check. Sensor-transaction and board-service failures are counted (`sampling_errors`, `service_errors`); a failed read leaves the previous sample to age, so outputs pause through the freshness gate until the sensor recovers.
 
 The output gate additionally expires at the earliest required sensor timestamp limit. A stalled sensor owner cannot leave outputs permitted merely because the next supervisor cycle has not occurred yet. The output owner checks its own ADC and supply state each cycle.
 

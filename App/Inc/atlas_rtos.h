@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 #include "atlas_board.h"
+#include "atlas_build.h"
 #include "atlas_rtos_policy.h"
 #include "atlas_sensor_samples.h"
 
@@ -51,13 +52,15 @@ typedef enum
     ATLAS_RTOS_VALID_GNSS_PPS               = (1UL << 9)
 } AtlasRtosSnapshotValid;
 
-/** @brief Sensors whose absence or staleness prevents watchdog refresh. */
+/** @brief Sensors whose absence or staleness pauses outputs (never a watchdog reset).
+ * GNSS is reported but not required: the flight never uses it. */
+#define ATLAS_RTOS_BNO_SENSOR_MASK \
+    (ATLAS_RTOS_VALID_BNO_ACCELEROMETER | ATLAS_RTOS_VALID_BNO_GYROSCOPE | \
+     ATLAS_RTOS_VALID_BNO_MAGNETOMETER | ATLAS_RTOS_VALID_BNO_ROTATION_VECTOR)
 #define ATLAS_RTOS_REQUIRED_SENSOR_MASK \
     (ATLAS_RTOS_VALID_ADXL375 | ATLAS_RTOS_VALID_LSM6DSV16B | \
      ATLAS_RTOS_VALID_MMC5983MA | ATLAS_RTOS_VALID_MS5611 | \
-     ATLAS_RTOS_VALID_BNO_ACCELEROMETER | ATLAS_RTOS_VALID_BNO_GYROSCOPE | \
-     ATLAS_RTOS_VALID_BNO_MAGNETOMETER | ATLAS_RTOS_VALID_BNO_ROTATION_VECTOR | \
-     ATLAS_RTOS_VALID_GNSS_NAV_PVT)
+     (ATLAS_USE_BNO085 ? ATLAS_RTOS_BNO_SENSOR_MASK : 0U))
 
 /** @brief Coherent publication assembled exclusively by the I/O owner task. */
 typedef struct
@@ -74,6 +77,7 @@ typedef struct
     AtlasLsm6dsv16bSample lsm6dsv16b;
     AtlasMmc5983maField mmc5983ma;
     AtlasMs5611Sample ms5611;
+#if ATLAS_USE_BNO085
     sh2_SensorValue_t bno_accelerometer;
     sh2_SensorValue_t bno_gyroscope;
     sh2_SensorValue_t bno_magnetometer;
@@ -82,6 +86,7 @@ typedef struct
     uint32_t bno_gyroscope_received_at_ms;
     uint32_t bno_magnetometer_received_at_ms;
     uint32_t bno_rotation_vector_received_at_ms;
+#endif
     AtlasGnssNavPvt gnss_nav_pvt;
     AtlasGnssPps gnss_pps;
     uint32_t sensor_recovery_until_ms;
@@ -164,8 +169,11 @@ typedef struct
     AtlasRtosState state;
     AtlasRtosFault fault;
     AtlasStatus startup_status;
-    AtlasStatus service_status;
-    AtlasStatus sampling_status;
+    AtlasStatus service_status;   /**< Latest board-service result (not latched). */
+    AtlasStatus sampling_status;  /**< Latest sensor-transaction failure (not latched). */
+    uint32_t service_errors;      /**< Board-service failures counted, never reset-worthy. */
+    uint32_t sampling_errors;     /**< Sensor-transaction failures counted, never reset-worthy. */
+    AtlasRtosFault output_block;  /**< Why outputs are blocked right now (NONE = permitted). */
     AtlasStatus last_command_status;
     AtlasRtosCommandType last_command_type;
     uint32_t last_command_ticket;
@@ -326,7 +334,8 @@ const char *AtlasRtos_FaultName(AtlasRtosFault fault);
  * @param now_ms Current HAL monotonic millisecond tick.
  * @note Override this weak function in one application source file. It must return
  *       before the next period, must not call hardware drivers, and may submit only
- *       bounded AtlasRtos commands.
+ *       bounded AtlasRtos commands. It is called even while outputs are inhibited
+ *       (not during maintenance); check AtlasRtos_OutputsPermitted() before outputs.
  */
 void AtlasRtos_ApplicationStep(const AtlasRtosSnapshot *snapshot,
                                uint32_t now_ms);

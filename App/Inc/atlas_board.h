@@ -19,6 +19,7 @@
 #include "atlas_adxl375.h"
 #include "atlas_ble.h"
 #include "atlas_bno085.h"
+#include "atlas_build.h"
 #include "atlas_buzzer.h"
 #include "atlas_gnss.h"
 #include "atlas_led.h"
@@ -83,7 +84,9 @@ typedef struct
     AtlasLsm6dsv16b lsm6dsv16b;
     AtlasMmc5983ma mmc5983ma;
     AtlasMs5611 ms5611;
+#if ATLAS_USE_BNO085
     AtlasBno085 bno085;
+#endif
     AtlasGnss gnss;
     AtlasRfd900x radio;
     AtlasBle ble;
@@ -92,8 +95,10 @@ typedef struct
     AtlasUartTransport gnss_transport;
     AtlasUartTransport radio_transport;
     AtlasUartTransport ble_transport;
+#if ATLAS_USE_BNO085
     sh2_SensorValue_t bno085_latest[SH2_MAX_SENSOR_ID + 1U];
     uint64_t bno085_available_mask;
+#endif
     AtlasBoardInitReport init;
     AtlasStatus runtime_fault;
     uint32_t service_cycles;
@@ -143,6 +148,7 @@ void AtlasBoard_LatchRuntimeFault(AtlasBoard *board, AtlasStatus status);
  */
 bool AtlasBoard_AllStartupStepsPassed(const AtlasBoard *board);
 
+#if ATLAS_USE_BNO085
 /**
  * @brief Copy the latest decoded BNO085 report for one SH-2 sensor ID.
  * @param board Initialized board instance.
@@ -157,6 +163,7 @@ bool AtlasBoard_GetBno085Sample(AtlasBoard *board,
                                 sh2_SensorId_t sensor_id,
                                 sh2_SensorValue_t *sample,
                                 bool consume);
+#endif
 
 #ifdef __cplusplus
 }

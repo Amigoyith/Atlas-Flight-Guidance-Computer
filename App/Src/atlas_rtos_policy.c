@@ -6,6 +6,7 @@
  * - AtlasRtosPolicy_PeriodDue(): handles millisecond counter rollover safely.
  * - AtlasRtosPolicy_TimestampFresh(): validates sample age across counter rollover.
  * - AtlasRtosPolicy_EvaluateSupervisor(): fails closed on status, liveness, or stack faults.
+ * - AtlasRtosPolicy_EvaluateLiveness(): task progress and stacks only (watchdog basis).
  */
 
 #include "atlas_rtos_policy.h"
@@ -113,4 +114,26 @@ AtlasRtosFault AtlasRtosPolicy_EvaluateSupervisor(
         return ATLAS_RTOS_FAULT_STACK_MARGIN;
     }
     return ATLAS_RTOS_FAULT_NONE;
+}
+
+/**
+ * @brief Evaluate software liveness only.
+ * @param input Complete supervisor input snapshot.
+ * @return The first liveness or stack fault; health results are ignored.
+ */
+AtlasRtosFault AtlasRtosPolicy_EvaluateLiveness(
+    const AtlasRtosSupervisorInput *input)
+{
+    AtlasRtosSupervisorInput live;
+
+    if (input == NULL)
+    {
+        return ATLAS_RTOS_FAULT_ASSERT;
+    }
+    live = *input;
+    live.startup_status = ATLAS_OK;
+    live.service_status = ATLAS_OK;
+    live.sampling_status = ATLAS_OK;
+    live.sensors_fresh = true;
+    return AtlasRtosPolicy_EvaluateSupervisor(&live);
 }

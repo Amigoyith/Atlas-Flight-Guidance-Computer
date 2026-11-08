@@ -92,7 +92,7 @@ bool AtlasRtosPolicy_TimestampFresh(uint32_t now_ms,
                                     uint32_t maximum_age_ms);
 
 /**
- * @brief Evaluate all conditions required to refresh the independent watchdog.
+ * @brief Evaluate every condition required to permit outputs.
  * @param input Complete supervisor input snapshot.
  * @return ATLAS_RTOS_FAULT_NONE only when both tasks progressed, statuses and
  *         required sensor freshness are OK (or freshness is paused by an active,
@@ -100,6 +100,17 @@ bool AtlasRtosPolicy_TimestampFresh(uint32_t now_ms,
  *         configured minimum margin.
  */
 AtlasRtosFault AtlasRtosPolicy_EvaluateSupervisor(
+    const AtlasRtosSupervisorInput *input);
+
+/**
+ * @brief Evaluate only software liveness, the sole basis for refreshing the watchdog.
+ * @param input Complete supervisor input snapshot.
+ * @return ATLAS_RTOS_FAULT_NONE when the I/O and application tasks progressed (or a
+ *         declared long I/O operation is within its deadline) and every stack keeps
+ *         its margin. Status, sensor-health and startup results are ignored: they
+ *         gate outputs but must never reset the board in flight.
+ */
+AtlasRtosFault AtlasRtosPolicy_EvaluateLiveness(
     const AtlasRtosSupervisorInput *input);
 
 #ifdef __cplusplus

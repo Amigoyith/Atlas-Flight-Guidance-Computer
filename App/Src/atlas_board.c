@@ -33,6 +33,7 @@ static AtlasStatus atlas_board_accumulate(AtlasStatus overall,
     return ((overall == ATLAS_OK) && (candidate != ATLAS_OK)) ? candidate : overall;
 }
 
+#if ATLAS_USE_BNO085
 /**
  * @brief Store the latest decoded BNO085 report by its sensor ID.
  * @param context Atlas board instance.
@@ -83,6 +84,7 @@ static AtlasStatus atlas_board_enable_bno_reports(AtlasBoard *board)
                                       0U);
     return atlas_board_accumulate(overall, status);
 }
+#endif
 
 /**
  * @brief Prepare fail-dark outputs and reports; normal builds also probe all modules.
@@ -131,7 +133,11 @@ AtlasStatus AtlasBoard_Init(AtlasBoard *board, const AtlasBoardHardware *hardwar
     /* The ordinary image retains eager startup. Bench probes run only on request,
      * AFTER USB/ADC tasks are available, so absent modules cannot hide diagnostics. */
     static const AtlasBoardModule order[] = {ATLAS_BOARD_ADXL, ATLAS_BOARD_LSM,
-        ATLAS_BOARD_MMC, ATLAS_BOARD_BARO, ATLAS_BOARD_BNO, ATLAS_BOARD_GNSS,
+        ATLAS_BOARD_MMC, ATLAS_BOARD_BARO,
+#if ATLAS_USE_BNO085
+        ATLAS_BOARD_BNO,
+#endif
+        ATLAS_BOARD_GNSS,
         ATLAS_BOARD_RADIO, ATLAS_BOARD_BLE};
     for (size_t i = 0U; i < sizeof(order) / sizeof(order[0]); ++i)
         overall = atlas_board_accumulate(overall, AtlasBoard_ProbeModule(board, order[i]));
@@ -201,11 +207,16 @@ AtlasStatus AtlasBoard_ProbeModule(AtlasBoard *board, AtlasBoardModule module)
             board->init.ms5611 = AtlasMs5611_Init(&board->ms5611, hardware->sensor_i2c);
             return board->init.ms5611;
         case ATLAS_BOARD_BNO:
+#if !ATLAS_USE_BNO085
+            board->init.bno085 = board->init.bno085_default_reports = ATLAS_ERROR_UNSUPPORTED;
+            return ATLAS_ERROR_UNSUPPORTED;
+#else
             board->init.bno085 = AtlasBno085_Init(&board->bno085, hardware->sensor_i2c,
                 hardware->microsecond_pps_timer, atlas_board_bno085_sample, board);
             board->init.bno085_default_reports = board->init.bno085 == ATLAS_OK ?
                 atlas_board_enable_bno_reports(board) : ATLAS_ERROR_NOT_READY;
             return atlas_board_accumulate(board->init.bno085, board->init.bno085_default_reports);
+#endif
         case ATLAS_BOARD_GNSS:
             board->init.gnss_ram_configuration = ATLAS_ERROR_NOT_READY;
             board->init.gnss = AtlasGnss_Init(&board->gnss, &board->gnss_transport,
@@ -249,11 +260,13 @@ AtlasStatus AtlasBoard_Service(AtlasBoard *board)
         return board->runtime_fault;
     }
 
+#if ATLAS_USE_BNO085
     if (board->bno085.initialized)
     {
         status = AtlasBno085_Service(&board->bno085);
         overall = atlas_board_accumulate(overall, status);
     }
+#endif
     if (board->init.gnss == ATLAS_OK)
     {
         status = AtlasGnss_Service(&board->gnss, 512U);
@@ -271,8 +284,9 @@ AtlasStatus AtlasBoard_Service(AtlasBoard *board)
     }
     AtlasBuzzer_Service(&board->buzzer);
     ++board->service_cycles;
-    board->runtime_fault = atlas_board_accumulate(board->runtime_fault, overall);
-    return board->runtime_fault;
+    /* Reported, not latched: one GNSS/radio/BLE UART error must not stop the other
+     * protocols (radio telemetry in particular) for the rest of the flight. */
+    return overall;
 }
 
 /**
@@ -306,14 +320,15 @@ bool AtlasBoard_AllStartupStepsPassed(const AtlasBoard *board)
            (board->init.lsm6dsv16b == ATLAS_OK) &&
            (board->init.mmc5983ma == ATLAS_OK) &&
            (board->init.ms5611 == ATLAS_OK) &&
-           (board->init.bno085 == ATLAS_OK) &&
-           (board->init.bno085_default_reports == ATLAS_OK) &&
+           (!ATLAS_USE_BNO085 || ((board->init.bno085 == ATLAS_OK) &&
+                                  (board->init.bno085_default_reports == ATLAS_OK))) &&
            (board->init.gnss == ATLAS_OK) &&
            (board->init.gnss_ram_configuration == ATLAS_OK) &&
            (board->init.radio_transport == ATLAS_OK) &&
            (board->init.ble == ATLAS_OK);
 }
 
+#if ATLAS_USE_BNO085
 /**
  * @brief Copy the latest decoded BNO085 report for one SH-2 sensor ID.
  * @param board Initialized board instance.
@@ -343,6 +358,7 @@ bool AtlasBoard_GetBno085Sample(AtlasBoard *board,
     }
     return true;
 }
+#endif
 
 /**
  * @brief Route GPIO interrupt sources to their allocation-free ISR handlers.
@@ -356,11 +372,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t gpio_pin)
     {
         return;
     }
+#if ATLAS_USE_BNO085
     if (gpio_pin == BNO085_H_INTN_Pin)
     {
         AtlasBno085_OnInterrupt(&atlas_active_board->bno085);
     }
-    else if (gpio_pin == LSM6_INT1_Pin)
+    else
+#endif
+    if (gpio_pin == LSM6_INT1_Pin)
     {
         AtlasLsm6dsv16b_OnInterrupt(&atlas_active_board->lsm6dsv16b);
     }

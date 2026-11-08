@@ -26,6 +26,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 option(ATLAS_BRINGUP "Build the non-actuating PCB diagnostic application" OFF)
 option(ATLAS_SERVO_BENCH "Allow bounded, explicitly enabled servo tests (pyro inhibited)" OFF)
 option(ATLAS_STAB_USE_MAGNETOMETER "Feed the MMC5983MA to the stabilization estimator for pre-launch heading (axis map and hard-iron offset must be verified first)" OFF)
+option(ATLAS_USE_BNO085 "Probe, sample and require the BNO085 (off: not used by any function)" OFF)
 option(ATLAS_CANARD_ROLL_TEST "ServoBench stabilization drives the canard roll-rate damp-and-hold test instead of gravity pointing" OFF)
 if(ATLAS_SERVO_BENCH AND NOT ATLAS_BRINGUP)
     message(FATAL_ERROR "ServoBench requires ATLAS_BRINGUP=ON")
@@ -60,7 +61,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_adxl375.c
     App/Src/atlas_analog.c
     App/Src/atlas_ble.c
-    App/Src/atlas_bno085.c
     App/Src/atlas_board.c
     App/Src/atlas_boot.c
     App/Src/atlas_bringup.c
@@ -94,10 +94,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_uart_transport.c
     App/Src/atlas_usb.c
     App/Src/atlas_usb_cdc.c
-    ThirdParty/CEVA/sh2/sh2.c
-    ThirdParty/CEVA/sh2/sh2_SensorValue.c
-    ThirdParty/CEVA/sh2/sh2_util.c
-    ThirdParty/CEVA/sh2/shtp.c
     ThirdParty/Fusion/Fusion/FusionAhrs.c
     ThirdParty/FreeRTOS-Kernel/list.c
     ThirdParty/FreeRTOS-Kernel/queue.c
@@ -105,6 +101,17 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ThirdParty/FreeRTOS-Kernel/tasks.c
     ThirdParty/FreeRTOS-Kernel/portable/GCC/ARM_CM7/r0p1/port.c
 )
+
+# BNO085 driver and CEVA SH-2 stack only when the BNO085 is enabled (no code or RAM otherwise)
+if(ATLAS_USE_BNO085)
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+        App/Src/atlas_bno085.c
+        ThirdParty/CEVA/sh2/sh2.c
+        ThirdParty/CEVA/sh2/sh2_SensorValue.c
+        ThirdParty/CEVA/sh2/sh2_util.c
+        ThirdParty/CEVA/sh2/shtp.c
+    )
+endif()
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -122,6 +129,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     ATLAS_SERVO_BENCH=$<BOOL:${ATLAS_SERVO_BENCH}>
     ATLAS_STAB_USE_MAGNETOMETER=$<BOOL:${ATLAS_STAB_USE_MAGNETOMETER}>
     ATLAS_CANARD_ROLL_TEST=$<BOOL:${ATLAS_CANARD_ROLL_TEST}>
+    ATLAS_USE_BNO085=$<BOOL:${ATLAS_USE_BNO085}>
 )
 
 if(ATLAS_SERVO_BENCH)
