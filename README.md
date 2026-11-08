@@ -4,7 +4,7 @@ Atlas is a collaborative STM32H743 flight-computer development project for the R
 
 **Current status: diagnostic firmware 1.3.0; hardware qualification ongoing.** ServoBench now includes [four-servo gravity stabilization](docs/STABILIZATION.md) for a fixed bench demonstration, with a dashboard tab, SD-saved calibration/enable setting and SW2 control independent of USB. Read the [three-pass review](docs/STABILIZATION_REVIEW.md) for evidence and remaining physical checks. Manual single-servo workbench operation retains its direct moves, corrected PCB numbering, ADC averaging and 8.55 V cutoff. The rev-0.1 RGB and pyro inhibits remain mandatory. Passing builds and host models do not establish flight readiness.
 
-## Start here
+## Start here!
 
 **Dashboard:** double-click **Start Atlas Dashboard.cmd** on Windows or [**Start Atlas Dashboard.command**](Start%20Atlas%20Dashboard.command) on macOS (Intel or Apple silicon). Install Python 3.10+ first; the launcher prepares its own environment and installs the bundled dashboard dependency offline. See the [Ground Station guide](docs/GROUND_STATION.md#start-the-dashboard) for setup, demo mode and Mac troubleshooting.
 
