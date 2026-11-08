@@ -190,12 +190,25 @@ void AtlasIo_EmergencyStop(void)
         CLEAR_BIT(TIM6->CR1, TIM_CR1_CEN);
         CLEAR_BIT(DMA1_Stream1->CR, DMA_SxCR_EN);
         GPIOD->BSRR = (uint32_t)PYRO_PINS << 16;
+#if !ATLAS_BRINGUP
+        /* Flight: canard servos keep their PWM at the configured neutral, so the canards are
+         * held straight instead of going limp. The timers run on in hardware, even through a
+         * fatal fault until the watchdog reset. No further position command is accepted. */
+        for (uint32_t i = 0; i < ATLAS_IO_PWM_CHANNELS; ++i)
+            if ((working.pwm_enabled_mask & (1U << i)) != 0U)
+            {
+                __HAL_TIM_SET_COMPARE(io_pwm_timer(i), pwm_routes[i].timer_channel, settings.pwm[i].neutral_us);
+                working.commanded_pwm_us[i] = settings.pwm[i].neutral_us;
+            }
+            else io_pwm_pin(i, false);
+#else
         CLEAR_BIT(TIM1->BDTR, TIM_BDTR_MOE);
         TIM1->CCER = 0U;
         TIM3->CCER = 0U;
         CLEAR_BIT(TIM1->CR1, TIM_CR1_CEN);
         CLEAR_BIT(TIM3->CR1, TIM_CR1_CEN);
         for (uint32_t i = 0; i < ATLAS_IO_PWM_CHANNELS; ++i) io_pwm_pin(i, false);
+#endif
         io_gpio_low();
     }
     io_unlock(mask);
@@ -990,12 +1003,23 @@ static AtlasStatus io_bench_servo_execute(const IoQueued *queued, uint32_t now)
     return ATLAS_OK;
 }
 #endif
-/** @brief Return all commanded outputs to their electrical defaults; budgets survive. */
+/** @brief Return all commanded outputs to their defaults; budgets survive. In the flight
+ * image enabled PWM channels are held at neutral (canards straight) rather than switched
+ * off; only an explicit ATLAS_IO_PWM_DISABLE removes their signal. */
 static void io_stop_all(void)
 {
     (void)io_pyro_stop();
     AtlasPyroPolicy_Disarm(&working.pyro, HAL_GetTick());
+#if !ATLAS_BRINGUP
+    for (uint32_t i = 0U; i < ATLAS_IO_PWM_CHANNELS; ++i)
+        if ((working.pwm_enabled_mask & (1U << i)) != 0U)
+        {
+            __HAL_TIM_SET_COMPARE(io_pwm_timer(i), pwm_routes[i].timer_channel, settings.pwm[i].neutral_us);
+            working.commanded_pwm_us[i] = settings.pwm[i].neutral_us;
+        }
+#else
     io_pwm_disable(UINT8_MAX);
+#endif
 #if ATLAS_SERVO_BENCH
     working.stabilization.active=false;
     if(working.stabilization.enabled)
@@ -1091,8 +1115,9 @@ static AtlasStatus io_execute_unlocked(const IoQueued *queued)
         case ATLAS_IO_PWM_ENABLE:
         {
             const uint8_t bits = command->arguments.channel_mask;
+            /* Same owner-selected ceiling as ServoBench: this board's rail measures ~8.42 V. */
             if (bits == 0U || (bits & (uint8_t)~settings.pwm_allowed_mask) != 0U ||
-                !io_rail(ATLAS_ANALOG_PWM_SUPPLY, now, 4800U, 8400U)) return ATLAS_ERROR_ARGUMENT;
+                !io_rail(ATLAS_ANALOG_PWM_SUPPLY, now, 4800U, ATLAS_IO_SERVO_MAX_MV)) return ATLAS_ERROR_ARGUMENT;
             for (uint32_t i = 0; i < ATLAS_IO_PWM_CHANNELS; ++i)
                 if ((bits & (1U << i)) != 0U && (working.pwm_enabled_mask & (1U << i)) == 0U)
                 {
@@ -1115,6 +1140,23 @@ static AtlasStatus io_execute_unlocked(const IoQueued *queued)
                                   command->arguments.pwm.pulse_us);
             working.commanded_pwm_us[channel] = command->arguments.pwm.pulse_us;
             return ATLAS_OK;
+        case ATLAS_IO_PWM_SET_MULTI:
+        {
+            /* All channels are checked before any compare changes, so a bad entry moves nothing. */
+            const uint8_t bits = command->arguments.pwm_multi.channel_mask;
+            if (bits == 0U || (bits & (uint8_t)~working.pwm_enabled_mask) != 0U) return ATLAS_ERROR_ARGUMENT;
+            for (uint32_t i = 0; i < ATLAS_IO_PWM_CHANNELS; ++i)
+                if ((bits & (1U << i)) != 0U && (command->arguments.pwm_multi.pulse_us[i] < settings.pwm[i].minimum_us ||
+                    command->arguments.pwm_multi.pulse_us[i] > settings.pwm[i].maximum_us)) return ATLAS_ERROR_ARGUMENT;
+            for (uint32_t i = 0; i < ATLAS_IO_PWM_CHANNELS; ++i)
+                if ((bits & (1U << i)) != 0U)
+                {
+                    __HAL_TIM_SET_COMPARE(io_pwm_timer(i), pwm_routes[i].timer_channel,
+                                          command->arguments.pwm_multi.pulse_us[i]);
+                    working.commanded_pwm_us[i] = command->arguments.pwm_multi.pulse_us[i];
+                }
+            return ATLAS_OK;
+        }
         case ATLAS_IO_GPIO_SET:
         {
             const uint8_t i = command->arguments.gpio.channel;
@@ -1200,10 +1242,10 @@ static void io_task(void *argument)
 #else
         /* Flight permission/voltage policy must not also cut a ServoBench channel. */
         const bool permitted = !emergency_latched && AtlasRtos_OutputsPermitted() && io_rail(ATLAS_ANALOG_3V3, now, 3000U, 3600U);
+        /* Permission loss holds the canards at neutral (io_stop_all); a servo-rail excursion
+         * in flight no longer cuts the signal, since a limp canard is worse than a held one. */
         if (last_permitted && !permitted) io_stop_all();
         last_permitted = permitted;
-        if (working.pwm_enabled_mask != 0U && !io_rail(ATLAS_ANALOG_PWM_SUPPLY, now, 4800U, 8400U))
-        { io_pwm_disable(UINT8_MAX); ++output_epoch; }
 #endif
         if (emergency_latched && !emergency_handled)
         {
@@ -1351,7 +1393,7 @@ AtlasStatus AtlasIo_Submit(const AtlasIoCommand *command, uint32_t *ticket)
 {
     if (command == NULL) return ATLAS_ERROR_NULL;
     if (!io_context()) return ATLAS_ERROR_STATE;
-    if ((uint32_t)command->type > ATLAS_IO_BENCH_SERVO_SWEEP) return ATLAS_ERROR_ARGUMENT;
+    if ((uint32_t)command->type > ATLAS_IO_PWM_SET_MULTI) return ATLAS_ERROR_ARGUMENT;
     const bool servo = command->type == ATLAS_IO_BENCH_SERVO_ENABLE || command->type == ATLAS_IO_BENCH_SERVO_SET ||
                        command->type == ATLAS_IO_BENCH_SERVO_SWEEP;
     if (servo && !ATLAS_SERVO_BENCH) return ATLAS_ERROR_UNSUPPORTED;

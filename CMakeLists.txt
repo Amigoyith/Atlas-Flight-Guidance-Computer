@@ -72,6 +72,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_gnss.c
     App/Src/atlas_imu_stream.c
     App/Src/atlas_expansion.c
+    App/Src/atlas_flight.c
+    App/Src/atlas_flight_app.c
+    App/Src/atlas_flight_estimator.c
     App/Src/atlas_io.c
     App/Src/atlas_led.c
     App/Src/atlas_lsm6dsv16b.c

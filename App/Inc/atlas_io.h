@@ -61,7 +61,8 @@ typedef enum
     ATLAS_IO_PYRO_DISARM, ATLAS_IO_PYRO_REQUEST,
     ATLAS_IO_BENCH_GPIO, /* Diagnostic image only, fixed 1 s logic-level pulse. */
     ATLAS_IO_BENCH_SERVO_ENABLE, ATLAS_IO_BENCH_SERVO_SET,
-    ATLAS_IO_BENCH_SERVO_SWEEP /* ServoBench only; one bounded 1 or 2 second cycle. */
+    ATLAS_IO_BENCH_SERVO_SWEEP, /* ServoBench only; one bounded 1 or 2 second cycle. */
+    ATLAS_IO_PWM_SET_MULTI /* Several enabled channels in one command (flight canards). */
 } AtlasIoCommandType;
 /** @brief Completely copied command; channels are ZERO-BASED, masks use bit 0 for connector 1. */
 typedef struct
@@ -71,6 +72,7 @@ typedef struct
     {
         AtlasOutputConfiguration configuration;
         struct { uint8_t channel; uint16_t pulse_us; } pwm;
+        struct { uint8_t channel_mask; uint16_t pulse_us[ATLAS_IO_PWM_CHANNELS]; } pwm_multi;
         struct { uint8_t channel; uint16_t minimum_us, maximum_us; } servo;
         struct { uint8_t channel; uint16_t period_ms; } sweep;
         struct { uint8_t channel; bool high; } gpio;

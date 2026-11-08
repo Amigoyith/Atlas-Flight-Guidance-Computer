@@ -175,7 +175,10 @@ static void command_cases(void)
     assert(io_execute(&item)==ATLAS_ERROR_STATE);
     item.submitted_ms=test_tick;test_safety_pending=true;
     assert(io_execute(&item)==ATLAS_OK); /* Safety IRQ waits until bounded register work ends. */
-    assert(emergency_latched && TIM1->CCER==0U && (GPIOE->MODER&(3U<<18))==(1U<<18));
+    /* Flight image: an enabled canard channel is held at neutral, not switched off. */
+    assert(emergency_latched && working.pwm_enabled_mask==1U && working.commanded_pwm_us[0]==1500U);
+    assert((GPIOB->MODER&3U)==2U);                  /* PWM 1 (PB0) still on its timer... */
+    assert((GPIOE->MODER&(3U<<18))==(1U<<18));      /* ...unused PWM 3 (PE9) driven low. */
     assert(io_execute(&item)==ATLAS_ERROR_STATE);
     /* Normal flight API uses the same PCB labels, while retaining its own gates. */
     for(unsigned ch=0U;ch<8U;++ch)
@@ -191,10 +194,21 @@ static void command_cases(void)
         assert(io_execute(&item)==ATLAS_OK && test_tim[bank[ch]].CCR[compare[ch]]==1600U);
         item.command=(AtlasIoCommand){.type=ATLAS_IO_PWM_DISABLE,.arguments.channel_mask=(uint8_t)(1U<<ch)};
         assert(io_execute(&item)==ATLAS_OK && TIM1->CCER==0U && TIM3->CCER==0U);
-        working.analog.millivolts[1]=8420U;
+        working.analog.millivolts[1]=8551U; /* Above the owner-selected 8.55 V servo ceiling. */
         item.command=(AtlasIoCommand){.type=ATLAS_IO_PWM_ENABLE,.arguments.channel_mask=(uint8_t)(1U<<ch)};
         item.epoch=output_epoch;
         assert(io_execute(&item)==ATLAS_ERROR_ARGUMENT);
+        working.analog.millivolts[1]=8420U; /* This board's measured rail now enables. */
+        assert(io_execute(&item)==ATLAS_OK && working.pwm_enabled_mask==(1U<<ch));
+        /* Several channels in one command; one out-of-range entry moves nothing. */
+        item.command=(AtlasIoCommand){.type=ATLAS_IO_PWM_SET_MULTI};
+        item.command.arguments.pwm_multi.channel_mask=(uint8_t)(1U<<ch);
+        item.command.arguments.pwm_multi.pulse_us[ch]=1450U;
+        assert(io_execute(&item)==ATLAS_OK && test_tim[bank[ch]].CCR[compare[ch]]==1450U);
+        item.command.arguments.pwm_multi.pulse_us[ch]=2200U;
+        assert(io_execute(&item)==ATLAS_ERROR_ARGUMENT && test_tim[bank[ch]].CCR[compare[ch]]==1450U);
+        item.command.arguments.pwm_multi.channel_mask=255U;
+        assert(io_execute(&item)==ATLAS_ERROR_ARGUMENT); /* Channels not enabled. */
     }
     puts("PASS IO: copied/bounded PWM, all PCB routes, normal voltage gates, expiry and emergency IRQ");
 }
