@@ -5,7 +5,7 @@ const context=vm.createContext({window:{},document:{getElementById:element},deta
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../../tools/bringup/web/radio.js'),'utf8'),context);
 const radio=context.window.AtlasRadio;
 const base={mode:'live',fresh:true,pending:null,batch:[],age_ms:0,hello:{radio_link:1},
- status:{ms:1000,owner_ms:1000,attempted:64,init:Array(10).fill(0),gpio:{pwm:0},radio:{
+ status:{ms:1000,owner_ms:1000,attempted:128,init:Array(12).fill(0),gpio:{pwm:0},radio:{
  connected:0,monitoring:0,waiting:0,test:0,test_sequence:1,test_peer:[1,2,3],peer:[1,2,3],rtt_ms:85,
  test_rtt_ms:85,ack_age_ms:0xFFFFFFFF,baud:57600,timeouts:0,rx:0,command:0}}};
 function check(edit=()=>{},good=true){const v=structuredClone(base);edit(v);radio.render(v,good);return radio.presentation(v,good);}
@@ -15,7 +15,7 @@ assert.equal(check(v=>Object.assign(v.status.radio,{monitoring:0,timeouts:31,tes
 let m=check(v=>Object.assign(v.status.radio,{connected:1,ack_age_ms:100,test:2}));
 assert.equal(m.connected,true);assert.match(m.result,/reply from 00000001-00000002-00000003 in 85 ms/);
 for(const edit of [v=>v.mode='demo',v=>v.mode='disconnected',v=>v.status.owner_ms=0,
- v=>v.status.init[7]=4,v=>v.status.radio.command=1,v=>delete v.hello.radio_link,
+ v=>v.status.init[9]=4,v=>v.status.radio.command=1,v=>delete v.hello.radio_link,
  v=>v.status.radio.ack_age_ms=6000,v=>{v.status.radio.ack_age_ms=5990;v.age_ms=20;}]){
  const v=structuredClone(base);Object.assign(v.status.radio,{connected:1,ack_age_ms:100});edit(v);
  assert.equal(radio.presentation(v,true).connected,false);

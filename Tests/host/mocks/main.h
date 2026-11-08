@@ -179,6 +179,10 @@ typedef HAL_StatusTypeDef (*AtlasTestI2cReceiveHook)(I2C_HandleTypeDef *i2c,
 #define LED_B_Pin                    GPIO_PIN_14
 #define LED_B_GPIO_Port              (&atlas_test_gpio_d)
 
+#define BNO085_H_INTN_Pin            GPIO_PIN_0
+#define BNO085_H_INTN_GPIO_Port      (&atlas_test_gpio_g)
+#define BNO085_NRST_Pin              GPIO_PIN_13
+#define BNO085_NRST_GPIO_Port        (&atlas_test_gpio_b)
 
 #define __DMB()                     do { } while (0)
 #define __disable_irq()             do { } while (0)
@@ -263,5 +267,6 @@ uint32_t AtlasTest_GetI2cDeinitCount(void);
 uint32_t AtlasTest_GetI2cInitCount(void);
 uint32_t AtlasTest_GetI2cAnalogFilterCount(void);
 uint32_t AtlasTest_GetI2cDigitalFilterCount(void);
+uint32_t AtlasTest_GetI2cDeinitWhileBnoResetCount(void);
 
 #endif /* ATLAS_TEST_MOCK_MAIN_H */

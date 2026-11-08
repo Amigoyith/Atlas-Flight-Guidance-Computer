@@ -9,7 +9,7 @@
 | [`Core/`](../Core/), [`USB_DEVICE/`](../USB_DEVICE/), [`FATFS/`](../FATFS/), [`Drivers/`](../Drivers/), [`Middlewares/`](../Middlewares/), [`cmake/stm32cubemx/`](../cmake/stm32cubemx/CMakeLists.txt) | CubeMX | Edit only inside `USER CODE BEGIN/END` blocks. Everything else is overwritten. |
 | [`App/Inc`](../App/Inc/), [`App/Src`](../App/Src/) | Atlas | All Atlas logic. Generated files reach it through one-line calls in their USER CODE blocks. |
 | [`App/CubeOverrides/`](../App/CubeOverrides/) | Atlas | Replacements of generated files that have no USER CODE hooks (see below). |
-| [`ThirdParty/`](../ThirdParty/) | Atlas | FreeRTOS and Fusion; CubeMX does not manage them. Do not enable CubeMX's FREERTOS middleware. |
+| [`ThirdParty/`](../ThirdParty/) | Atlas | FreeRTOS and CEVA; CubeMX does not manage them. Do not enable CubeMX's FREERTOS middleware. |
 | [`CMakeLists.txt`](../CMakeLists.txt), [`cmake/atlas_cube_overrides.cmake`](../cmake/atlas_cube_overrides.cmake), [`EWARM/`](../EWARM/) | Atlas | CubeMX creates the top-level `CMakeLists.txt` once and never rewrites it. The IAR project is maintained by hand because the CubeMX toolchain is CMake. |
 
 The linker script and `Core/Src/sysmem.c` are generated once and kept by CubeMX; a regeneration changes only the stack-size line, which `Atlas.ioc` already sets to `0x3FE0`.

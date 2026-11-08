@@ -54,10 +54,23 @@ function confirmAction(title,copy){
 function usable(s){return !!s&&!!state?.fresh&&!networkFailed&&!state?.blocked;}
 function sensorGood(s,index,key){return !!(s.attempted&(1<<index))&&!s.init[index]&&[0,4].includes(s.sample_status[index])&&s.count[index]>0&&age(s,s[key].t)<=1500;}
 function railValue(s,index){return s&&s.power.available&&!s.power.status&&s.power.count>0&&age(s,s.power.t)<=500&&(s.power.valid&(1<<index))?s.power.mv[index]/1000:null;}
-function gnssGood(s){const g=s.gnss;return !!(s.attempted&16)&&!s.init[4]&&!s.init[5]&&g.frames>0&&age(s,g.t)<=2500&&!!(g.flags&1)&&[3,4].includes(g.fix)&&finite(g.lat_e7)&&Math.abs(g.lat_e7)<=900000000&&finite(g.lon_e7)&&Math.abs(g.lon_e7)<=1800000000;}
+function gnssGood(s){const g=s.gnss;return !!(s.attempted&32)&&!s.init[6]&&!s.init[7]&&g.frames>0&&age(s,g.t)<=2500&&!!(g.flags&1)&&[3,4].includes(g.fix)&&finite(g.lat_e7)&&Math.abs(g.lat_e7)<=900000000&&finite(g.lon_e7)&&Math.abs(g.lon_e7)<=1800000000;}
+function orientation(s){
+  if(!s||!(s.attempted&16)||s.init[4]||s.init[5]||!s.bno.count[3]||age(s,s.bno.t[3])>1500||!s.bno.q_ppm.every(finite))return null;
+  let q=s.bno.q_ppm.map(v=>v/1e6);const norm=Math.hypot(...q);if(norm<.5||norm>1.5)return null;q=q.map(v=>v/norm);
+  const [w,x,y,z]=q,d=180/Math.PI;
+  return {roll:Math.atan2(2*(w*x+y*z),1-2*(x*x+y*y))*d,pitch:Math.asin(Math.max(-1,Math.min(1,2*(w*y-z*x))))*d,yaw:(Math.atan2(2*(w*z+x*y),1-2*(y*y+z*z))*d+360)%360};
+}
 function metric(id,value,unit,digits=2){$(id).innerHTML=number(value,digits)+' <small>'+esc(unit)+'</small>';}
 function details(id,pairs){$(id).innerHTML=pairs.map(([key,value])=>'<div><dt>'+esc(key)+'</dt><dd>'+esc(value)+'</dd></div>').join('');}
 function eventsHTML(events){return events.map(e=>'<div class="event '+esc(e.kind)+'"><time>'+esc(e.time)+'</time><span>'+esc(e.message)+'</span></div>').join('')||'<p class="muted">No activity recorded.</p>';}
+function attitude(q){
+  const roll=q?.roll||0,pitch=q?.pitch||0;
+  let ticks='';for(let degrees=-60;degrees<=60;degrees+=10){const a=degrees*Math.PI/180;const r=degrees%30===0?105:110;ticks+=`<line x1="${130+Math.sin(a)*r}" y1="${130-Math.cos(a)*r}" x2="${130+Math.sin(a)*117}" y2="${130-Math.cos(a)*117}" stroke="#809a9e" stroke-width="${degrees%30===0?2:1}"/>`;}
+  let ladder='';for(let p=-30;p<=30;p+=10){if(p===0)continue;const y=130-p*2;const wide=Math.abs(p)%20===0?36:22;ladder+=`<path d="M${130-wide} ${y}h${wide*2}" stroke="#c1d5d1" opacity=".65"/><text x="${137+wide}" y="${y+3}" fill="#bbcfcf" font-size="8" font-family="Consolas">${Math.abs(p)}</text>`;}
+  $('attitude').innerHTML=`<svg viewBox="0 0 260 246" role="img" aria-label="${q?'Roll '+number(roll,1)+' degrees, pitch '+number(pitch,1)+' degrees':'No valid attitude measurement'}"><defs><clipPath id="horizon-clip"><circle cx="130" cy="130" r="95"/></clipPath></defs><circle cx="130" cy="130" r="119" fill="#0d171c" stroke="#2e414b"/>${ticks}<g clip-path="url(#horizon-clip)" opacity="${q?1:.28}"><g transform="rotate(${-roll} 130 130) translate(0 ${pitch*2})"><rect x="-120" y="-200" width="500" height="330" fill="#1c424b"/><rect x="-120" y="130" width="500" height="360" fill="#35342d"/><path d="M-120 130H380" stroke="#92c2bd" stroke-width="1.5"/>${ladder}</g></g><circle cx="130" cy="130" r="95" fill="none" stroke="#3f565b"/><path d="M66 130h34l8 8h44l8-8h34M130 121v18" stroke="#affbd4" fill="none" stroke-width="2.7"/><circle cx="130" cy="130" r="3" fill="#affbd4"/><path d="M124 8l6 9 6-9" fill="#a8c8ba"/><text x="130" y="239" text-anchor="middle" fill="#8ca2a5" font-family="Consolas" font-size="9">${q?'BOARD ORIENTATION':'NO VALID ATTITUDE'}</text></svg>`;
+  for(const key of ['roll','pitch','yaw'])$(key).innerHTML=number(q?.[key],1)+'<em>°</em>';
+}
 function chart(id,history,series,{unit='',minimumSpan=.1,color='#f2b277'}={}){
   const w=490,h=id==='pressure-chart'?110:174,left=43,right=12,top=10,bottom=24;
   const all=history.flatMap(s=>series.map(fn=>fn(s))).filter(finite);
@@ -124,15 +137,16 @@ function render(v){
     const fix=good&&gnssGood(s);metric('altitude',fix&&finite(s.gnss.h_msl_mm)?s.gnss.h_msl_mm/1000:null,'m',1);$('fix-state').textContent=fix?'3D fix · '+s.gnss.sv+' satellites':'No valid 3D fix';
     metric('accel',good&&sensorGood(s,1,'lsm')&&s.lsm.mg.every(finite)?Math.hypot(...s.lsm.mg)/1000:null,'g',3);
     metric('age',v.status&&!networkFailed?v.age_ms:null,'ms',0);$('telemetry-state').textContent=good?'Packet #'+s.seq+(v.hello?.servo_layout===1?' · ServoBench status stream':' · 2 Hz status stream'):'No fresh telemetry';
+    const q=good?orientation(s):null;attitude(q);$('attitude-state').textContent=q?'BNO085 · ACCURACY '+s.bno.accuracy[3]:'BNO085 · NO VALID DATA';
     chart('motion-chart',v.history,[0,1,2].map(i=>a=>sensorGood(a,1,'lsm')&&finite(a.lsm.mg[i])?a.lsm.mg[i]/1000:null),{unit:'Acceleration in g',minimumSpan:.2});
     chart('pressure-chart',v.history,[a=>sensorGood(a,3,'baro')&&finite(a.baro.pa)?a.baro.pa/100:null],{unit:'Pressure in hPa',minimumSpan:.5});
     $('motion-chart').style.opacity=$('pressure-chart').style.opacity=good?'1':'.4';
     $('pressure').innerHTML=number(good&&sensorGood(s,3,'baro')&&finite(s.baro.pa)?s.baro.pa/100:null,2)+' <small>hPa</small>';
     $('temperature').textContent='Temperature '+number(good&&sensorGood(s,3,'baro')&&finite(s.baro.temp_cc)?s.baro.temp_cc/100:null,2)+' °C';
-    const modules=[['ADXL375','High-g accelerometer',0],['LSM6DSV16B','6-axis inertial sensor',1],['MMC5983MA','Magnetometer',2],['MS5611','Barometric pressure',3],['GNSS + PPS','NEO-M9N receiver',4]];
+    const modules=[['ADXL375','High-g accelerometer',0],['LSM6DSV16B','6-axis inertial sensor',1],['MMC5983MA','Magnetometer',2],['MS5611','Barometric pressure',3],['BNO085','Orientation + fusion',7],['GNSS + PPS','NEO-M9N receiver',8]];
     let count=0;
     $('health-list').innerHTML=modules.map(([name,label,index])=>{let status=good?v.rows[index]?.[1]||'UNKNOWN':'NO DATA';const okay=['RESPONDING','FIX REPORTED'].includes(status);if(okay)count++;const color=okay?'good':status==='FAILED'?'bad':status==='NO DATA'||status==='NOT TESTED'?'':'warn';return `<div class="health-row"><div><strong>${name}</strong><small>${label}</small></div><span class="health-state ${color}">${esc(okay?'RESPONDING':status.replace('RESPONDING / ','').replace('FIX REPORTED','3D FIX'))}</span></div>`;}).join('');
-    $('system-count').textContent=count+' / 5 RESPONDING';
+    $('system-count').textContent=count+' / 6 RESPONDING';
     $('latitude').textContent=fix?number(s.gnss.lat_e7/1e7,7)+'°':'—';$('longitude').textContent=fix?number(s.gnss.lon_e7/1e7,7)+'°':'—';
     $('satellites').textContent=good&&s.gnss.frames?s.gnss.sv:'—';$('hacc').textContent=fix?number(s.gnss.hacc_mm/1000,2)+' m':'—';
     $('recent-events').innerHTML=eventsHTML(v.events.slice(-2).reverse());
@@ -197,7 +211,7 @@ document.addEventListener('click',event=>{
   const nav=event.target.closest('[data-view]');if(nav){showView(nav.dataset.view);return;}
   const button=event.target.closest('[data-command]');if(button&&!button.disabled)command(button.dataset.command);
 });
-$('probe-buttons').innerHTML=['adxl','lsm','mmc','baro','gnss'].map(m=>`<button data-command="probe ${m}">${m.toUpperCase()}</button>`).join('');
+$('probe-buttons').innerHTML=['adxl','lsm','mmc','baro','bno','gnss'].map(m=>`<button data-command="probe ${m}">${m.toUpperCase()}</button>`).join('');
 $('gpio-buttons').innerHTML=Array.from({length:7},(_,i)=>`<button data-command="gpio ${i+1}">${i+1}</button>`).join('')+'<button data-command="gpio 0">All low</button>';
 $('connection-button').onclick=async()=>{if(state?.mode!=='disconnected'){await act('disconnect');return;}$('bench-confirm').checked=false;$('connect-dialog').showModal();await ports();};
 $('refresh-ports').onclick=ports;

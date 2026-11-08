@@ -48,7 +48,8 @@ Addresses below are seven-bit I2C addresses; the HAL adapter applies the require
 | ADXL375 U1 | SPI2; CS PG12; board MOSI gating | 400 Hz, 4-wire/right-justified |
 | MMC5983MA U9 | SPI2; CS PG11 | On-demand conversion, 200 Hz bandwidth code |
 | SPI3 bus / LSM6DSV16B U27 | PB3 SCK, PB4 MISO, PB2 MOSI; IMU CS PG10, INT1 PG2 | Mode 3, nominal 3.125 MHz; INT2 at TP11 |
-| I2C1 bus | PB8 SCL, PB9 SDA | MS5611 (the BNO085 is not used by firmware); external pull-ups |
+| I2C1 bus | PB8 SCL, PB9 SDA | Shared BNO085/MS5611; external pull-ups |
+| BNO085 U12 | I2C1 `0x4A`; reset PB13, active-low interrupt PG0 | SA0/H_MOSI is strapped low; four SH-2 reports; shares TIM2 timebase with GNSS |
 | MS5611 U14 | I2C1 `0x77` | PROM/CRC, compensated D2/D1 conversion |
 | NEO-M9N U23 | USART1 MCU TX PB14 / RX PB15; PPS PA15 TIM2 CH1 | 38400 8N1 host; stale-RX preflight before `MON-VER`; intended RAM-only 10 Hz NAV-PVT; external antenna J27; reset not MCU-routed |
 | NINA-B112 U21 | USART6 MCU TX PG14 / RX PG9, RTS PG8 / CTS PG15 | 115200 8N1 RTS/CTS; reset PD4, SWITCH1 PG5, SWITCH2 PG4, module DSR driven PG6, DTR observed PE1 |

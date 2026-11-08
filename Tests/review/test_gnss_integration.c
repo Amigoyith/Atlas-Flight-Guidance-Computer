@@ -8,8 +8,8 @@
  * - main(): checks stale-RX recovery, explicit retry, shared timer use, and resync.
  *
  * Links the production GNSS, UART, status, and time implementations. The timer
- * precondition matches the board starting the shared counter before AtlasGnss_Init();
- * this does not simulate the complete board boot.
+ * precondition matches AtlasBno085_Init() preceding AtlasGnss_Init() in board
+ * startup; this does not simulate BNO085 hardware or the complete board boot.
  */
 #include "atlas_gnss.h"
 #include "atlas_time.h"
@@ -249,7 +249,7 @@ int main(void)
     failures += resync_failed ? 1U : 0U;
     failures += review_parser_cases(&gnss);
 
-    /* Independent board-order fixture: the shared clock request precedes the
+    /* Independent board-order fixture: the BNO085 clock request precedes the
      * first GNSS capture request. The sole shared-counter helper owns HAL start. */
     (void)AtlasUartTransport_Stop(&transport);
     counter_registers.CR1 = 0U;

@@ -7,7 +7,7 @@ or remote command. Both boards require 1.5.0. The existing Communications round-
 remains available and has its own explicit acknowledgements.
 
 The remote view includes direct accelerometers/gyroscope, magnetometer, barometer,
-GNSS position/fix/PPS, ten ADC channels with raw readings and
+BNO085 reports/quaternion, GNSS position/fix/PPS, ten ADC channels with raw readings and
 voltages, temperature, storage presence/errors, SW2, PWM/stabilization state and faults.
 Missing sensors and an indoor GPS without a fix are reported as unavailable, not zeros
 or invented positions. Local and remote measurements have separate envelopes and UI
@@ -70,9 +70,9 @@ in [remote_telemetry.py](../tools/bringup/remote_telemetry.py). No C structure p
 | Words | Contents |
 |---|---|
 | 0–4 | `TLS1` schema magic, source uptime, firmware version, profile, attempted sensor mask |
-| 5–32 | Init results (words 5–14; 15–16 reserved), successful sample counts, error counts, sample statuses and times |
+| 5–32 | Init results, successful sample counts, error counts, sample statuses and times |
 | 33–47 | Direct acceleration in mg, gyro in millidegrees/s, temperature in centidegrees C, magnetic field in nT, pressure in Pa |
-| 48–69 | Reserved (formerly BNO085 reports); always zero |
+| 48–69 | BNO report counts/times/accuracy; acceleration mm/s², gyro milliradians/s, magnetic nT, quaternion W/X/Y/Z in millionths |
 | 70–80 | GNSS receive time/count, fix/flags/satellites, lat/lon in 1e-7 degrees, altitude/accuracy in mm, time of week and PPS diagnostics |
 | 81–105 | ADC time/count/status/validity, VDDA, die temperature, ten mV channels, packed raw uint16 counts, error/reset/power/fault evidence |
 | 106–123 | GPIO/SW2/PWM, stabilization state/up vector, eight pulse widths, SD state/errors, sensor service errors, TX count and startup flag |

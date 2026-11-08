@@ -28,6 +28,7 @@ Use **[startup](startup.md)** for the new PCB. It centralizes power/BOOT/reset/U
 | LSM6DSV16B | SPI3 identity/configuration; accel/gyro ready checks; coalesced INT1 plus 5 ms fallback | Paired sample timing, interrupt routing, axes and expansion coexistence |
 | MMC5983MA | SPI2 identity, automatic SET/RESET on-demand field reads every nominal 50 ms | Magnetic calibration/interference and physical conversion timing |
 | MS5611 | I2C1 PROM/CRC and compensated D2/D1 reads at OSR1024 every nominal 100 ms; minimum waits corrected | Actual conversion timing, pressure reference, thermal behavior and plausibility |
+| BNO085 | I2C1 `0x4A` SH-2/SHTP identity plus four reports; edge-gated two-phase reads, finite discovery and reset-first shared-I2C recovery | Owner reports version 1.0.1 follow-up streaming successfully; retain long-run/error/shared-bus evidence and qualify fitted firmware, calibration, axes and timing |
 | NEO-M9N GNSS/GPS + PPS | USART stale-RX preflight; UBX identity before PPS; RAM-only 10 Hz NAV-PVT configuration/readback; bounded parser recovery; explicit failed-probe retry and stage/HAL diagnostics | September 11 receiver identity/RAM configuration and NAV reception passed; antenna/fix/accuracy/UTC and measured PPS remain pending |
 | RFD900x at J9 | USART3 raw transport; queued mode/identity/settings/parameter/host-baud operations | Exact SiK firmware, regulated power, antenna, lawful RF settings and bidirectional peer test |
 | NINA-B112 BLE | USART6 RTS/CTS; reset/identity; queued SPS configuration and mode transitions | u-connectXpress version/features, advertising, SPS client, CTS/DTR behavior and reconnect |
@@ -84,6 +85,6 @@ TIM6+DMA drives both pyro edges without task progress. It still shares MCU clock
 
 ## What passing tests do not mean
 
-The tests exercise real code with explicit boundary models; they are not a board simulator. ADC samples, timer/DMA events, RTC responses and USB low-level completions are injected. The complete FreeRTOS kernel, radio peers, card hardware and electrical outputs are not exercised by those tests.
+The tests exercise real code with explicit boundary models; they are not a board simulator. ADC samples, timer/DMA events, RTC responses and USB low-level completions are injected. The complete FreeRTOS kernel, actual BNO085 startup, radio peers, card hardware and electrical outputs are not exercised by those tests.
 
 No flight-control algorithm, actuator linkage calibration, power-loss-safe logging format, cryptographic command authorization, bootloader, board fabrication approval or flight qualification is supplied. Follow the [review report](REVIEW_REPORT.md) and [engineering standards](DEVELOPMENT.md), not historical “all pass” labels.

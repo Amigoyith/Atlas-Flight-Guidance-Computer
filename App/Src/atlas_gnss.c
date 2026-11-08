@@ -797,7 +797,7 @@ AtlasStatus AtlasGnss_Init(AtlasGnss *gnss,
 
     /* PPS is intentionally started only after UART identity succeeds. A failed
      * communication probe can therefore be retried without disturbing TIM2's
-     * capture channel or an already-running microsecond clock. */
+     * capture channel or the BNO085 user's already-running microsecond clock. */
     status = AtlasTime_StartCounter(pps_timer);
     if (status != ATLAS_OK)
     {

@@ -18,7 +18,7 @@ STATUS_NAMES = (
     "OK", "NULL", "ARGUMENT", "BUSY", "NOT_READY", "TIMEOUT", "IO",
     "IDENTITY", "CRC", "PROTOCOL", "NACK", "OVERFLOW", "UNSUPPORTED", "STATE",
 )
-MODULES = ("adxl", "lsm", "mmc", "baro", "gnss", "ble", "radio")
+MODULES = ("adxl", "lsm", "mmc", "baro", "bno", "gnss", "ble", "radio")
 GNSS_FAILURE_STAGES = (
     "none", "transport init", "transport start", "MON-VER write",
     "MON-VER service", "MON-VER timeout", "timebase start",
@@ -123,7 +123,7 @@ def validate(frame: object) -> dict:
         for key in ("seq", "ms", "owner_ms", "attempted", "pending_id", "service"):
             if not _integer(frame.get(key)):
                 raise ValueError(f"Invalid {key}")
-        for key, size in (("init", 10), ("count", 4), ("errors", 4), ("sample_status", 4)):
+        for key, size in (("init", 12), ("count", 4), ("errors", 4), ("sample_status", 4)):
             if not _array(frame.get(key), size):
                 raise ValueError(f"Invalid {key} array")
         required = {
@@ -146,6 +146,25 @@ def validate(frame: object) -> dict:
             part = frame.get(section)
             if not isinstance(part, dict) or any(not _integer(part.get(k)) for k in keys):
                 raise ValueError(f"Invalid {section} object")
+        bno = frame.get("bno")
+        if not isinstance(bno, dict):
+            raise ValueError("Missing BNO reports")
+        bno_health = bno.get("health")
+        if bno_health is not None:
+            counter_keys = ("interrupts", "reads", "writes", "io_errors", "protocol_errors",
+                            "decoded", "decode_errors", "resets", "recovery_attempts",
+                            "recovery_failures", "last_hal_error")
+            if (not isinstance(bno_health, dict) or
+                    any(not _integer(bno_health.get(k)) for k in counter_keys) or
+                    not _integer(bno_health.get("last_hal_status"), 0, 3) or
+                    not _integer(bno_health.get("failure_stage"), 0, 9) or
+                    not _integer(bno_health.get("last_length"), 0, 1024) or
+                    not _integer(bno_health.get("pending_length"), 0, 1024) or
+                    not _integer(bno_health.get("intn_low"), 0, 1) or
+                    not _integer(bno_health.get("initialized"), 0, 1) or
+                    bno_health.get("recovery_failures", 1) >
+                    bno_health.get("recovery_attempts", 0)):
+                raise ValueError("Invalid bno.health object")
         led = frame.get("led")
         if "buzzer" in frame:
             buzzer = frame["buzzer"]
@@ -176,7 +195,10 @@ def validate(frame: object) -> dict:
             raise ValueError("Invalid ADC3 reference diagnostic state")
         arrays = (("adxl", "mg", 3, True), ("lsm", "mg", 3, True),
                   ("lsm", "mdps", 3, True), ("mmc", "nt", 3, True),
-                  ("power", "mv", 10, False),
+                  ("bno", "count", 4, False), ("bno", "t", 4, False),
+                  ("bno", "accuracy", 4, False), ("bno", "accel_mm_s2", 3, True),
+                  ("bno", "gyro_mrad_s", 3, True), ("bno", "mag_nt", 3, True),
+                  ("bno", "q_ppm", 4, True), ("power", "mv", 10, False),
                   ("power", "raw", 10, False), ("sd", "utc", 6, False),
                   ("tasks", "stack_words", 5, False))
         for section, key, size, signed in arrays:
@@ -206,7 +228,7 @@ def validate(frame: object) -> dict:
                 raise ValueError('Invalid radio link telemetry')
             if radio['connected'] and (radio['ack_age_ms'] >= 6000 or radio['rtt_ms'] >= 2000 or
                     not any(radio['peer']) or not radio['acknowledgements'] or radio['command'] or
-                    not frame['attempted'] & 64 or frame['init'][7] != 0):
+                    not frame['attempted'] & 128 or frame['init'][9] != 0):
                 raise ValueError('Radio connection lacks fresh round-trip evidence')
             if radio['test'] == 2 and (not any(radio['test_peer']) or
                     not radio['test_sequence'] or radio['test_rtt_ms'] >= 2000):
@@ -559,9 +581,26 @@ def observations(s: dict) -> list[tuple[str, str, str, str]]:
             detail = "No accepted measurement yet"
         detail += f"; samples {s['count'][index]}, errors {s['errors'][index]}, init {s['init'][index]}"
         rows.append((label, state, str(age) if s["count"][index] else "--", detail))
+    bno = s["bno"]
+    for i, name in enumerate(("BNO accel", "BNO gyro", "BNO magnetic", "BNO quaternion")):
+        age = age_ms(s["ms"], bno["t"][i])
+        state = ("NOT TESTED" if not s["attempted"] & 16 else "FAILED" if any(s["init"][4:6]) else
+                 "NO SAMPLES" if bno["count"][i] == 0 else "STALE" if age > 1500 else "RESPONDING")
+        key, scale, unit = (("accel_mm_s2", 1000, "m/s2"), ("gyro_mrad_s", 1000, "rad/s"),
+                            ("mag_nt", 1000, "uT"), ("q_ppm", 1e6, "[w,x,y,z]"))[i]
+        if state == "RESPONDING" and any(v is None for v in bno[key]):
+            state = "INVALID DATA"
+        detail = _values(bno[key], scale, unit) + \
+                 f"; count {bno['count'][i]}, accuracy {bno['accuracy'][i]}"
+        if i == 0 and isinstance(bno.get("health"), dict):
+            h = bno["health"]
+            detail += (f"; I2C reads/writes {h['reads']}/{h['writes']}, errors {h['io_errors']}, "
+                       f"stage {h['failure_stage']}, HAL {h['last_hal_status']}/0x{h['last_hal_error']:08X}, "
+                       f"pending {h['pending_length']}, INTN {h['intn_low']}")
+        rows.append((name, state, str(age) if bno["count"][i] else "--", detail))
     g = s["gnss"]
     age = age_ms(s["ms"], g["t"])
-    state = ("NOT TESTED" if not s["attempted"] & 16 else "FAILED" if any(s["init"][4:6]) else
+    state = ("NOT TESTED" if not s["attempted"] & 32 else "FAILED" if any(s["init"][6:8]) else
              "NO FRAMES" if not g["frames"] else "STALE" if age > 2500 else
              "FIX REPORTED" if g["flags"] & 1 and g["fix"] in (3, 4) else "RESPONDING / NO 3D FIX")
     rows.append(("GNSS + PPS", state, str(age) if g["frames"] else "--",
@@ -571,7 +610,7 @@ def observations(s: dict) -> list[tuple[str, str, str, str]]:
                  f"UART RX/TX {g['rx_bytes']}/{g['tx_bytes']}, errors {g['uart_errors']}, "
                  f"preflight/retry {g['preflights']}/{g['start_retries']}, "
                  f"HAL {g['hal_status']}/0x{g['hal_error']:08X}; {g['version']}"))
-    for module, init_index, bit in (("ble", 6, 32), ("radio", 7, 64)):
+    for module, init_index, bit in (("ble", 8, 64), ("radio", 9, 128)):
         part = s[module]
         state = "NOT TESTED" if not s["attempted"] & bit else "FAILED" if s["init"][init_index] else "TRANSPORT INITIALIZED"
         detail = f"command mode {part['command']}; RX bytes {part['rx']}; last hex {part['last_hex']}"

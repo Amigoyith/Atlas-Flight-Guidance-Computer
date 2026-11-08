@@ -45,7 +45,7 @@ A nonzero exit is a failure, not an expected red baseline. The review runner use
 
 ## 3. Understand stock startup before connecting hardware
 
-- Sensor identity/configuration probes run before scheduling. GNSS clears stale USART RX, proves `MON-VER`, and then uses the idempotently started shared TIM2 counter.
+- Sensor identity/configuration probes run before scheduling. GNSS clears stale USART RX, proves `MON-VER`, and then joins BNO085 on an idempotently started TIM2; neither resets the other's timebase.
 - ADC/voltage/input monitoring runs without output qualification. Invalid readings remain marked invalid.
 - Storage makes a read-only boot mount attempt. Absence or an invalid filesystem is nonfatal to unrelated services. No boot log, formatting or deletion occurs.
 - USB exposes its pull-up only after stable VBUS; transmission requires enumeration. It is a bounded byte transport, **not a supplied console or command interpreter**.

@@ -202,16 +202,16 @@ class StationTests(unittest.TestCase):
 
     def test_stale_telemetry_cannot_authorize_action(self):
         self.live();self.s.session.received_at=time.monotonic()-10
-        with self.assertRaises(ValueError):self.s.send("probe baro")
+        with self.assertRaises(ValueError):self.s.send("probe bno")
         self.assertEqual(self.s.serial.writes,[])
 
     def test_no_new_action_with_pending_command(self):
-        self.live();self.s.send("probe baro")
+        self.live();self.s.send("probe bno")
         with self.assertRaises(ValueError):self.s.send("probe gnss")
         self.assertEqual(len(self.s.serial.writes),1)
 
     def test_no_retry_after_timeout(self):
-        self.live();self.s.send("probe baro");self.s.session.pending.began-=50
+        self.live();self.s.send("probe bno");self.s.session.pending.began-=50
         self.s.tick();self.s.tick()
         self.assertTrue(self.s.session.blocked)
         self.assertEqual(len(self.s.serial.writes),1)
@@ -224,11 +224,11 @@ class StationTests(unittest.TestCase):
 
     def test_short_write_latches_uncertainty(self):
         self.live();self.s.serial.write=lambda data:1
-        with self.assertRaises(IOError):self.s.send("probe baro")
+        with self.assertRaises(IOError):self.s.send("probe bno")
         self.assertTrue(self.s.session.blocked)
 
     def test_disconnect_clears_history_and_pending(self):
-        self.live();device=self.s.serial;self.s.send("probe baro")
+        self.live();device=self.s.serial;self.s.send("probe bno")
         self.s.disconnect()
         self.assertTrue(device.closed);self.assertIsNone(self.s.snapshot()["status"])
         self.assertEqual(self.s.snapshot()["history"],[])

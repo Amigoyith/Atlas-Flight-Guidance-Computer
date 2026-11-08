@@ -57,6 +57,7 @@
 #define ATLAS_RTOS_LSM_MAX_AGE_MS                    (50U)
 #define ATLAS_RTOS_MMC_MAX_AGE_MS                   (250U)
 #define ATLAS_RTOS_MS5611_MAX_AGE_MS                (500U)
+#define ATLAS_RTOS_BNO_MAX_AGE_MS                   (500U)
 #define ATLAS_RTOS_GNSS_MAX_AGE_MS                 (1000U)
 #define ATLAS_RTOS_SENSOR_RECOVERY_GRACE_MS         (1200U)
 
@@ -217,10 +218,13 @@ static uint32_t atlas_rtos_output_expiry(const AtlasRtosSnapshot *snapshot, uint
         snapshot->maintenance_active || snapshot->sensor_recovery_active) return now_ms;
     const uint32_t stamps[] = {snapshot->adxl375.timestamp_ms, snapshot->lsm6dsv16b.timestamp_ms,
         snapshot->mmc5983ma.timestamp_ms, snapshot->ms5611.timestamp_ms,
+        snapshot->bno_accelerometer_received_at_ms, snapshot->bno_gyroscope_received_at_ms,
+        snapshot->bno_magnetometer_received_at_ms, snapshot->bno_rotation_vector_received_at_ms,
         snapshot->gnss_nav_pvt.received_at_ms};
     const uint32_t limits[] = {ATLAS_RTOS_ADXL_MAX_AGE_MS, ATLAS_RTOS_LSM_MAX_AGE_MS,
         ATLAS_RTOS_MMC_MAX_AGE_MS, ATLAS_RTOS_MS5611_MAX_AGE_MS,
-        ATLAS_RTOS_GNSS_MAX_AGE_MS};
+        ATLAS_RTOS_BNO_MAX_AGE_MS, ATLAS_RTOS_BNO_MAX_AGE_MS,
+        ATLAS_RTOS_BNO_MAX_AGE_MS, ATLAS_RTOS_BNO_MAX_AGE_MS, ATLAS_RTOS_GNSS_MAX_AGE_MS};
     uint32_t remaining = UINT32_MAX;
     for (uint32_t i = 0; i < sizeof(stamps) / sizeof(stamps[0]); ++i)
     {
@@ -260,12 +264,41 @@ static void atlas_rtos_publish_snapshot(uint32_t now_ms)
 }
 
 /**
- * @brief Capture newly decoded GNSS and PPS reports into the working snapshot.
+ * @brief Capture newly decoded BNO085, GNSS, and PPS reports into the working snapshot.
  */
 static void atlas_rtos_capture_protocol_samples(void)
 {
     AtlasBoard *board = atlas_rtos.board;
+    const uint32_t now_ms = HAL_GetTick();
 
+    if (AtlasBoard_GetBno085Sample(board, SH2_ACCELEROMETER,
+                                   &atlas_rtos.working_snapshot.bno_accelerometer,
+                                   true))
+    {
+        atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_BNO_ACCELEROMETER;
+        atlas_rtos.working_snapshot.bno_accelerometer_received_at_ms = now_ms;
+    }
+    if (AtlasBoard_GetBno085Sample(board, SH2_GYROSCOPE_CALIBRATED,
+                                   &atlas_rtos.working_snapshot.bno_gyroscope,
+                                   true))
+    {
+        atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_BNO_GYROSCOPE;
+        atlas_rtos.working_snapshot.bno_gyroscope_received_at_ms = now_ms;
+    }
+    if (AtlasBoard_GetBno085Sample(board, SH2_MAGNETIC_FIELD_CALIBRATED,
+                                   &atlas_rtos.working_snapshot.bno_magnetometer,
+                                   true))
+    {
+        atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_BNO_MAGNETOMETER;
+        atlas_rtos.working_snapshot.bno_magnetometer_received_at_ms = now_ms;
+    }
+    if (AtlasBoard_GetBno085Sample(board, SH2_ROTATION_VECTOR,
+                                   &atlas_rtos.working_snapshot.bno_rotation_vector,
+                                   true))
+    {
+        atlas_rtos.working_snapshot.valid_mask |= ATLAS_RTOS_VALID_BNO_ROTATION_VECTOR;
+        atlas_rtos.working_snapshot.bno_rotation_vector_received_at_ms = now_ms;
+    }
     if (AtlasGnss_GetLatestNavPvt(&board->gnss,
                                   &atlas_rtos.working_snapshot.gnss_nav_pvt,
                                   true))
@@ -322,6 +355,30 @@ static uint32_t atlas_rtos_stale_sensor_mask(const AtlasRtosSnapshot *snapshot,
                                         ATLAS_RTOS_MS5611_MAX_AGE_MS))
     {
         stale_mask |= ATLAS_RTOS_VALID_MS5611;
+    }
+    if (!AtlasRtosPolicy_TimestampFresh(
+            now_ms, snapshot->bno_accelerometer_received_at_ms,
+            ATLAS_RTOS_BNO_MAX_AGE_MS))
+    {
+        stale_mask |= ATLAS_RTOS_VALID_BNO_ACCELEROMETER;
+    }
+    if (!AtlasRtosPolicy_TimestampFresh(
+            now_ms, snapshot->bno_gyroscope_received_at_ms,
+            ATLAS_RTOS_BNO_MAX_AGE_MS))
+    {
+        stale_mask |= ATLAS_RTOS_VALID_BNO_GYROSCOPE;
+    }
+    if (!AtlasRtosPolicy_TimestampFresh(
+            now_ms, snapshot->bno_magnetometer_received_at_ms,
+            ATLAS_RTOS_BNO_MAX_AGE_MS))
+    {
+        stale_mask |= ATLAS_RTOS_VALID_BNO_MAGNETOMETER;
+    }
+    if (!AtlasRtosPolicy_TimestampFresh(
+            now_ms, snapshot->bno_rotation_vector_received_at_ms,
+            ATLAS_RTOS_BNO_MAX_AGE_MS))
+    {
+        stale_mask |= ATLAS_RTOS_VALID_BNO_ROTATION_VECTOR;
     }
     if (!AtlasRtosPolicy_TimestampFresh(now_ms,
                                         snapshot->gnss_nav_pvt.received_at_ms,

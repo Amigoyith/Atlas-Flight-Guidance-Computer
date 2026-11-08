@@ -15,8 +15,7 @@ _Static_assert(sizeof(AtlasStabilizationConfig) == ATLAS_STAB_CONFIG_BYTES, "SD 
 _Static_assert(offsetof(AtlasStabilizationConfig, crc) == 60U, "SD record layout");
 #define STAB_MAGIC UINT32_C(0x41535442)
 #define RAD_PER_DEG 0.01745329251994329577f
-/* Must equal the LSM6DSV16B ODR feeding the estimator (DefaultConfig, 240 Hz); it scales
- * Fusion's rejection timeout and startup ramp. The true period is set per update. Gain 2/s
+/* Nominal LSM6DSV16B rate (240 Hz); the true period is set per update. Gain 2/s
  * is a 0.5 s accelerometer time constant. Acceleration beyond 10 degrees of
  * disagreement is ignored for up to 5 s, then the accelerometer is trusted again. */
 #define STAB_AHRS_RATE_HZ 240.0f

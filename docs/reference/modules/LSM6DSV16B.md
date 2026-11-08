@@ -103,6 +103,7 @@ Multiple edges may coalesce into one foreground indication. Use the health inter
 - No FIFO watermark interrupt, self-test, filtering selection or sensor-hub feature is configured. FIFO DMA transfers, sample loss and the sensor-to-MCU clock mapping are bench-pending.
 - INT1 behavior and board-level pull configuration require physical confirmation.
 - Nominal sensitivities are not calibrated scale factors.
+- The direct IMU and BNO085 clocks are not synchronized.
 
 ## Primary reference
 

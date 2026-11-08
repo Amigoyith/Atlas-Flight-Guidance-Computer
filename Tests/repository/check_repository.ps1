@@ -87,7 +87,7 @@ $requiredPaths = @(
     "ThirdParty\FreeRTOS-Kernel\README.md"
 )
 $requiredPaths += @(
-    "ADXL375", "LSM6DSV16B", "MMC5983MA", "MS5611",
+    "ADXL375", "LSM6DSV16B", "MMC5983MA", "MS5611", "BNO085",
     "GNSS", "BLE", "RFD900X", "LED", "BUZZER"
 ) | ForEach-Object { "docs\reference\modules\$_.md" }
 foreach ($relativePath in $requiredPaths) {

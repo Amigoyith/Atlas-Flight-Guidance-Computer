@@ -81,7 +81,7 @@ AtlasStatus AtlasTime_StartCounter(TIM_HandleTypeDef *timer)
     if ((timer->State == HAL_TIM_STATE_BUSY) &&
         ((timer->Instance->CR1 & TIM_CR1_CEN) != 0U))
     {
-        return ATLAS_OK; /* GNSS and other users share time; none may reset it. */
+        return ATLAS_OK; /* BNO085 and GNSS share time; neither may reset it. */
     }
     if ((timer->State != HAL_TIM_STATE_READY) ||
         ((timer->Instance->CR1 & TIM_CR1_CEN) != 0U))

@@ -60,6 +60,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_adxl375.c
     App/Src/atlas_analog.c
     App/Src/atlas_ble.c
+    App/Src/atlas_bno085.c
     App/Src/atlas_board.c
     App/Src/atlas_boot.c
     App/Src/atlas_bringup.c
@@ -93,6 +94,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/atlas_uart_transport.c
     App/Src/atlas_usb.c
     App/Src/atlas_usb_cdc.c
+    ThirdParty/CEVA/sh2/sh2.c
+    ThirdParty/CEVA/sh2/sh2_SensorValue.c
+    ThirdParty/CEVA/sh2/sh2_util.c
+    ThirdParty/CEVA/sh2/shtp.c
     ThirdParty/Fusion/Fusion/FusionAhrs.c
     ThirdParty/FreeRTOS-Kernel/list.c
     ThirdParty/FreeRTOS-Kernel/queue.c
@@ -104,6 +109,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/Inc
+    ThirdParty/CEVA/sh2
     ThirdParty/Fusion/Fusion
     ThirdParty/FreeRTOS-Kernel/include
     ThirdParty/FreeRTOS-Kernel/portable/GCC/ARM_CM7/r0p1

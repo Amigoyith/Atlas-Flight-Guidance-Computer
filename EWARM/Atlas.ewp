@@ -354,6 +354,7 @@
         <option>
           <name>CCIncludePath2</name>
           <state>$PROJ_DIR$/../App/Inc</state>
+          <state>$PROJ_DIR$/../ThirdParty/CEVA/sh2</state>
           <state>$PROJ_DIR$/../ThirdParty/Fusion/Fusion</state>
           <state>$PROJ_DIR$/../ThirdParty/FreeRTOS-Kernel/include</state>
           <state>$PROJ_DIR$/../ThirdParty/FreeRTOS-Kernel/portable/IAR/ARM_CM7/r0p1</state>
@@ -1106,6 +1107,7 @@
         <name>Atlas Drivers</name>
         <file><name>$PROJ_DIR$/../App/Src/atlas_adxl375.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_ble.c</name></file>
+        <file><name>$PROJ_DIR$/../App/Src/atlas_bno085.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_board.c</name></file>
         <file><name>$PROJ_DIR$/../App/Src/atlas_boot.c</name></file>
         <file><name>$PROJ_DIR$/atlas_boot_branch.s</name></file>
@@ -1185,6 +1187,13 @@
   </group>
   <group>
     <name>ThirdParty</name>
+    <group>
+      <name>CEVA SH2</name>
+      <file><name>$PROJ_DIR$/../ThirdParty/CEVA/sh2/sh2.c</name></file>
+      <file><name>$PROJ_DIR$/../ThirdParty/CEVA/sh2/sh2_SensorValue.c</name></file>
+      <file><name>$PROJ_DIR$/../ThirdParty/CEVA/sh2/sh2_util.c</name></file>
+      <file><name>$PROJ_DIR$/../ThirdParty/CEVA/sh2/shtp.c</name></file>
+    </group>
     <group>
       <name>Fusion AHRS</name>
       <file><name>$PROJ_DIR$/../ThirdParty/Fusion/Fusion/FusionAhrs.c</name></file>

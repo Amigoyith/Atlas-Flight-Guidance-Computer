@@ -64,7 +64,7 @@ class RemoteTests(unittest.TestCase):
             with self.assertRaises(ValueError):validate(bad)
 
     def test_semantic_corruption_even_with_valid_crc(self):
-        for offset,value in [(0,1),(3,2),(5,14),(25,20),(15,1),(72,6),(83,512),(84,1024),(106,0x80000000),(107,7<<16),(115,14<<8),(123,2),(124,1)]:
+        for offset,value in [(0,1),(3,2),(5,14),(25,20),(56,4),(72,6),(83,512),(84,1024),(106,0x80000000),(107,7<<16),(115,14<<8),(123,2),(124,1)]:
             w=sample();w[offset]=value
             with self.assertRaises(ValueError):decode_snapshot(encode(w))
 

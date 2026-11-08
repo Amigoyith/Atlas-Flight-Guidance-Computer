@@ -151,7 +151,7 @@ class ServoTests(unittest.TestCase):
         self.servo(self.enable)
         self.station.session.blocked='uncertain command'
         self.station.session.received_at=0
-        self.station.batch=['probe baro']
+        self.station.batch=['probe bno']
         self.station.action('servo-stop',{})
         self.assertEqual(self.station.serial.writes[-1],b'2 servo stop\n')
         self.assertFalse(self.station.batch)

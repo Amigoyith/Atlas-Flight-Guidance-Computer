@@ -138,7 +138,7 @@ bool AtlasBench_Parse(const char *line, AtlasBenchCommand *command)
     if (strcmp(token[1], "probe") == 0 && count == 3U)
     {
         static const char *const devices[] = {"adxl", "lsm",  "mmc", "baro",
-                                              "gnss", "ble", "radio"};
+                                              "bno",  "gnss", "ble", "radio"};
         for (size_t i = 0U; i < sizeof(devices) / sizeof(devices[0]); ++i)
             if (strcmp(token[2], devices[i]) == 0)
             {

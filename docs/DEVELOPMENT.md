@@ -48,7 +48,7 @@ node Tests/bringup/test_instruments.js
 node Tests/bringup/test_buzzer_ui.js
 ```
 
-- **Host suite:** selected sensor register/math, UBX, AT/profile, LED/buzzer, UART overflow and watchdog-policy contracts. It does not run the complete FreeRTOS kernel, board startup, SD or USB on hardware.
+- **Host suite:** selected sensor register/math, UBX, AT/profile, LED/buzzer, UART overflow and watchdog-policy contracts. It does not run the complete FreeRTOS kernel, board startup, BNO085/SHTP, SD or USB on hardware.
 - **Repository checker:** local Markdown targets, required guides, App file/function documentation, excluded artifacts, static-allocation policy and CMake/IAR membership. It does not certify runtime behavior or external URLs.
 - **Review probes:** corrected timer/delay/GNSS, analog/pyro policy and real SD/BSP/disk/FatFs integration on a RAM volume. They must pass; exit 1 means a behavioral failure and 2 a harness/build error.
 - **Service models:** real output-owner boundaries, actual USB core/class control and data routing, scripted USB/RTC/storage task lifecycles and expansion transactions. The finite task model is not FreeRTOS scheduling or silicon. See [evidence and limits](REVIEW_REPORT.md#executable-evidence).
