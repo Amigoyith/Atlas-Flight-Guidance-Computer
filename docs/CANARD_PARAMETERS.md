@@ -37,9 +37,9 @@ Confidence: **Known** = taken from team documents; **Estimate** = derived from k
 | `max_deflection_deg` | **10** mechanical, 5 for the first active flight | Physical stops must enforce this, not only software |
 | `max_rate_dps` | 300 | Below KST X10 slew speed |
 | Hinge line | ≈ 25 % of root chord | Close to the centre of pressure, to keep hinge moment low |
-| Servo | KST X10 V8.0, 10 µs/deg, 1500 µs neutral | Bench servo. Check its torque against the hinge moment (2× margin, per the Structures Technical Goal). |
+| Servo | KST X10 V8.0, 10 µs/deg, 1500 µs neutral | Bench servo. Open loop: no position feedback wire, only PWM in. Signal HIGH min 3.3 V (Atlas drives 3.3 V, no margin). See [servo interface](CANARD_CONTROL.md#servo-interface-open-loop-no-feedback). |
 
-Rough hinge load at 250 m/s and 10° deflection: normal force ≈ q·S·CLα·δ ≈ 30 N per canard. If the centre of pressure ends up 5–15 mm from the hinge, that is 0.15–0.45 N·m (1.5–4.6 kg·cm) before margin.
+Rough hinge load at 250 m/s and 10° deflection: normal force ≈ q·S·CLα·δ ≈ 30 N per canard. If the centre of pressure ends up 5–15 mm from the hinge, that is 0.15–0.45 N·m (1.5–4.6 kg·cm) before margin, or 3.0–9.2 kg·cm with the 2× margin. The X10 is rated 9.5 kgf·cm at 7.4 V and 7.5 at 6.0 V, so the upper end of that range **does not fit** the margin. Keep the hinge line close to the canard centre of pressure, or choose a stronger servo. Because there is no servo feedback, a stalled canard would not be detected.
 
 ## 3. What the controller can do with these numbers
 

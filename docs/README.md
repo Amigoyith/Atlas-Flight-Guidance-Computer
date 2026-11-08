@@ -18,6 +18,7 @@
 | Change pins, clocks, DMA or interrupts in CubeMX and regenerate | [CubeMX regeneration](CUBEMX.md) |
 | Configure or tune the canard attitude controller (Fusion AHRS inputs) | [Canard control](CANARD_CONTROL.md) |
 | Airframe and canard numbers the controller needs (2026–27 baseline) | [Canard parameters](CANARD_PARAMETERS.md) |
+| Flight phases (pad, engine on, coast, chute), estimator modes, sensor timing, flight telemetry | [Flight state machine](FLIGHT_STATE_MACHINE.md) |
 | Understand a reported defect or the latest review evidence | [Current review report](REVIEW_REPORT.md) |
 | Work on task ownership, timing, snapshots, or watchdogs | [RTOS reference](reference/RTOS.md) |
 | Trace connectors, rails, pin assignments, or hardware conflicts | [Hardware reference](reference/HARDWARE.md) |

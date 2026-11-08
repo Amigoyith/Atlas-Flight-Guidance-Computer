@@ -1,6 +1,6 @@
 # Canard control
 
-[`atlas_canard.c`](../App/Src/atlas_canard.c) is a PID attitude controller for canards. It takes the outputs of the [Fusion AHRS](https://github.com/xioTechnologies/Fusion) and returns a deflection and a servo pulse for each canard. It is a pure calculation module: it is **not yet connected** to the RTOS, the servo PWM outputs or flight-phase logic.
+[`atlas_canard.c`](../App/Src/atlas_canard.c) is a PID attitude controller for canards. It takes the outputs of the [Fusion AHRS](https://github.com/xioTechnologies/Fusion) and returns a deflection and a servo pulse for each canard. It is a pure calculation module. In the flight image, [`atlas_flight_app.c`](../App/Src/atlas_flight_app.c) runs it during upward coast only, fed by the flight estimator; PWM output stays off until the vehicle's servo limits are qualified. See [Flight state machine](FLIGHT_STATE_MACHINE.md).
 
 ## What it does
 
@@ -21,6 +21,28 @@
    - The bench roll test has no parachute and never sets it.
 
 Because the gains act on angular acceleration, they don't depend on the airframe. When the canard size or position changes, update the geometry fields; the response stays the same.
+
+## Servo interface: open loop, no feedback
+
+The KST X10 V8.0 servos have three wires only: signal (orange), supply (red) and ground (brown). Their position potentiometer is internal and is **not reported back**. Atlas only sends a PWM pulse; it never knows where a canard actually is.
+- `deflection_deg` and `pulse_us` in the output are **commands**, not measured angles. The slew limiter tracks the last command, not the shaft.
+- The only feedback in the loop is the **IMU**: if a canard lags, stalls under air load, or is linked wrong, the controller sees it only as the rocket rolling differently than expected, and keeps correcting from the gyro.
+- A stalled, disconnected or reversed canard therefore cannot be detected directly. The bench sign check and a pre-flight horn-position check are the only protection against it.
+- After `signal_off` the servo stops receiving pulses. It may hold or release its last position. The 20 s neutral period before cutoff exists so that the last commanded position is neutral.
+
+Signal levels, from the [KST X10 V8.0 specification](https://www.kst-servo-shop.de/media/44/69/96/1749814229/KST_0106_X10_V8_Datenblatt_04_2025_de.pdf?ts=1751463833) (2025-04):
+
+| Item | Datasheet value | Atlas |
+|---|---|---|
+| Signal HIGH | min 3.3 V, max 5.0 V | Driven directly by STM32 timer pins at 3.3 V: **exactly at the minimum, no margin** |
+| Signal LOW | 0.0–1.5 V | ≈ 0 V |
+| Pulse range | 900–2100 µs | Clamped to `min_pulse_us`/`max_pulse_us` |
+| Position mapping | 1000/1500/2000 µs = −50°/0°/+50° (10 µs/deg) | `servo_us_per_deg` = ±10 |
+| Frame | 1520 µs / 333 Hz | 333 Hz |
+| Speed (no load) | 0.16 / 0.14 / 0.12 / 0.10 s per 60° at 4.8 / 6.0 / 7.4 / 8.4 V (375–600 °/s) | Slew cap 200 °/s, below the slowest rating |
+| Torque | 6.2 / 7.5 / 9.5 / 10.8 kgf·cm at 4.8 / 6.0 / 7.4 / 8.4 V | Must exceed 2× the hinge moment |
+
+The 3.3 V HIGH level has no margin: any droop in the MCU supply puts the signal below the servo's minimum. Before flight, scope the signal at the servo connector with the servo attached. If HIGH reads below 3.3 V, add a buffer that drives 3.3–5.0 V (for example a 74AHCT-family gate supplied from 5 V).
 
 ## Feeding it from Fusion
 
