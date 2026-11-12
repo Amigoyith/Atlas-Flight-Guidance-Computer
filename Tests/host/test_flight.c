@@ -1,7 +1,7 @@
 /**
  * @file test_flight.c
  * @brief Host tests for the flight-phase state machine (ADXL375 + barometer only).
- * Major functions: main runs dwell, false-trigger, descent, timeout and config cases.
+ * Major functions: main runs dwell, false-trigger, descent, landing, timeout and config cases.
  */
 #include "atlas_flight.h"
 #include <math.h>
@@ -112,8 +112,10 @@ static void descent_cases(void)
     CHECK(s.f.reason == ATLAS_FLIGHT_REASON_BARO_DESCENT, "baro descent reason");
     CHECK(chute_ms > apogee_ms + 10000U, "CHUTE only after 10 s past apogee");
     CHECK(chute_ms < descent_start_ms + 11500U, "CHUTE within ~1.5 s of the 10 s descent dwell");
-    printf("  apogee at %.1f s, falling > 1 m/s at %.1f s, CHUTE at %.1f s (sim time)\n",
-           apogee_ms * 0.001f, descent_start_ms * 0.001f, chute_ms * 0.001f);
+    printf("  apogee at %.1f s (recorded %.1f s), falling > 1 m/s at %.1f s, CHUTE at %.1f s (sim time)\n",
+           apogee_ms * 0.001f, s.f.apogee_ms * 0.001f, descent_start_ms * 0.001f, chute_ms * 0.001f);
+    CHECK(s.f.apogee_ms + 1500U > apogee_ms && s.f.apogee_ms < apogee_ms + 1500U, "apogee time recorded within 1.5 s");
+    CHECK(fabsf(s.f.max_altitude_m - h) > 100.0f && s.f.max_altitude_m > 2000.0f, "peak altitude kept after apogee");
     /* One way: CHUTE is final even if inputs look like boost again. */
     sim_run(&s, 1000U, 9.0f, 0.0f, true);
     CHECK(s.f.phase == ATLAS_FLIGHT_CHUTE, "phases never go backwards");
@@ -143,6 +145,61 @@ static void timeout_case(void)
     CHECK(s.f.phase == ATLAS_FLIGHT_COAST, "still coasting before the timeout");
     sim_run(&s, 1500U, 0.5f, 0.0f, false);
     CHECK(s.f.phase == ATLAS_FLIGHT_CHUTE && s.f.reason == ATLAS_FLIGHT_REASON_COAST_TIMEOUT, "timeout backstop");
+}
+
+/** @brief Reach CHUTE quickly: boost, burnout, then 11 s falling at 6 m/s from 500 m.
+ * @param s Simulation. @return Altitude at CHUTE. */
+static float sim_to_chute(Sim *s)
+{
+    sim_init(s);
+    sim_run(s, 200U, 8.0f, 0.0f, true);
+    sim_run(s, 300U, 0.5f, 0.0f, true);
+    float h = 500.0f;
+    for (int i = 0; i < 1500 && s->f.phase == ATLAS_FLIGHT_COAST; ++i) { h -= 0.06f; sim_step(s, 1.0f, h, true); }
+    return h;
+}
+
+/** @brief Under the parachute (6 m/s, noisy) it stays in CHUTE; once on the ground and steady
+ * for 10 s it is LANDED, and LANDED is final. */
+static void landed_cases(void)
+{
+    Sim s;
+    float h = sim_to_chute(&s);
+    CHECK(s.f.phase == ATLAS_FLIGHT_CHUTE, "in CHUTE");
+    srand(11);
+    while (h > 0.0f && s.f.phase == ATLAS_FLIGHT_CHUTE)
+    {
+        h -= 0.06f;
+        const float noise = ((float)rand() / (float)RAND_MAX - 0.5f) * 1.0f;
+        sim_step(&s, 1.0f, (h > 0.0f ? h : 0.0f) + noise, true);
+    }
+    CHECK(s.f.phase == ATLAS_FLIGHT_CHUTE, "descending at 6 m/s is not landed");
+    const uint32_t touchdown = s.t;
+    uint32_t landed_ms = 0U;
+    for (int i = 0; i < 3000 && s.f.phase == ATLAS_FLIGHT_CHUTE; ++i)
+    {
+        const float noise = ((float)rand() / (float)RAND_MAX - 0.5f) * 1.0f;
+        sim_step(&s, 1.0f, noise, true);
+        landed_ms = s.t;
+    }
+    CHECK(s.f.phase == ATLAS_FLIGHT_LANDED && s.f.reason == ATLAS_FLIGHT_REASON_LANDED_STILL, "steady on ground -> LANDED");
+    CHECK(landed_ms >= touchdown + 10000U && landed_ms <= touchdown + 13000U, "LANDED 10-13 s after touchdown");
+    printf("  touchdown at %.1f s, LANDED at %.1f s (sim time)\n", touchdown * 0.001f, landed_ms * 0.001f);
+    sim_run(&s, 1000U, 9.0f, 300.0f, true);
+    CHECK(s.f.phase == ATLAS_FLIGHT_LANDED, "LANDED is final");
+
+    /* A short pause in the descent (e.g. main deployment, 5 s) does not count as landed. */
+    h = sim_to_chute(&s);
+    sim_run(&s, 5000U, 1.0f, h, true);
+    for (int i = 0; i < 500; ++i) { h -= 0.06f; sim_step(&s, 1.0f, h, true); }
+    CHECK(s.f.phase == ATLAS_FLIGHT_CHUTE, "5 s steady in the air is not landed");
+
+    /* No barometer under the parachute: the 15 min backstop still reaches LANDED. */
+    sim_to_chute(&s);
+    sim_run(&s, 890000U, 1.0f, 0.0f, false);
+    CHECK(s.f.phase == ATLAS_FLIGHT_CHUTE, "still CHUTE before the landed timeout");
+    sim_run(&s, 11000U, 1.0f, 0.0f, false);
+    CHECK(s.f.phase == ATLAS_FLIGHT_LANDED && s.f.reason == ATLAS_FLIGHT_REASON_LANDED_TIMEOUT, "landed timeout backstop");
 }
 
 /** @brief Stale or invalid ADXL samples break a dwell instead of extending it. */
@@ -183,6 +240,7 @@ int main(void)
     descent_cases();
     false_descent_case();
     timeout_case();
+    landed_cases();
     stale_case();
     config_case();
     if (failures) { printf("%d flight FSM check(s) failed\n", failures); return 1; }

@@ -47,7 +47,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(frames[2]['ble']['model'], '\x01' * 96)
         self.assertIn('nt', frames[2]['mmc'])
         self.assertIn('mag_nt', frames[2]['bno'])
-        self.assertIn('health', frames[2]['bno'])
+        # BNO085 is compiled out by default (ATLAS_USE_BNO085=0): the placeholder has no health object.
+        self.assertNotIn('health', frames[2]['bno'])
         self.assertIn('led', frames[2])
         remote=frames[3]['data']
         self.assertEqual(remote['lsm']['mg'][:2],[-1250,None])

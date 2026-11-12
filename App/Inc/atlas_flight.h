@@ -1,6 +1,6 @@
 /**
  * @file atlas_flight.h
- * @brief Flight-phase state machine: PAD -> ENGINE_ON -> COAST -> CHUTE, one way only.
+ * @brief Flight-phase state machine: PAD -> ENGINE_ON -> COAST -> CHUTE -> LANDED, one way only.
  *
  * Phase TRANSITIONS use only the ADXL375 (high-g accelerometer) and the MS5611
  * barometer. They are deliberately independent of STATE ESTIMATION (Fusion on the
@@ -10,6 +10,9 @@
  * - ENGINE_ON -> COAST: ADXL magnitude below coast_accel_g for coast_dwell_ms.
  * - COAST -> CHUTE: barometric altitude decreasing for descent_dwell_ms (10 s), or the
  *   coast_timeout_ms backstop. Canard control is allowed only in COAST.
+ * - CHUTE -> LANDED: barometric climb rate within +-landed_rate_m_s for landed_dwell_ms
+ *   (10 s), or the landed_timeout_ms backstop. LANDED only starts the buzzer heartbeat.
+ * - Apogee is an event, not a phase: apogee_ms is the time of the highest altitude after launch.
  *
  * Major functions: DefaultConfig, Init, Step. Pure C: no HAL, RTOS or allocation.
  */
@@ -24,7 +27,8 @@ typedef enum
     ATLAS_FLIGHT_PAD = 0,       /**< On the pad; estimator calibrates; canards off. */
     ATLAS_FLIGHT_ENGINE_ON = 1, /**< Motor burning; estimator gyro + magnetometer; canards off. */
     ATLAS_FLIGHT_COAST = 2,     /**< Upward coast; canard roll control on. */
-    ATLAS_FLIGHT_CHUTE = 3      /**< Descent; canards neutral, then signal off. */
+    ATLAS_FLIGHT_CHUTE = 3,     /**< Descent; canards neutral, then signal off. */
+    ATLAS_FLIGHT_LANDED = 4     /**< On the ground after descent; buzzer heartbeat. */
 } AtlasFlightPhase;
 
 /** @brief Why the last transition happened. */
@@ -34,7 +38,9 @@ typedef enum
     ATLAS_FLIGHT_REASON_BOOST_ACCEL,   /**< ADXL above boost_accel_g for the dwell. */
     ATLAS_FLIGHT_REASON_BURNOUT_ACCEL, /**< ADXL below coast_accel_g for the dwell. */
     ATLAS_FLIGHT_REASON_BARO_DESCENT,  /**< Altitude decreasing for descent_dwell_ms. */
-    ATLAS_FLIGHT_REASON_COAST_TIMEOUT  /**< Backstop: coast lasted coast_timeout_ms. */
+    ATLAS_FLIGHT_REASON_COAST_TIMEOUT, /**< Backstop: coast lasted coast_timeout_ms. */
+    ATLAS_FLIGHT_REASON_LANDED_STILL,  /**< Altitude steady for landed_dwell_ms. */
+    ATLAS_FLIGHT_REASON_LANDED_TIMEOUT /**< Backstop: descent lasted landed_timeout_ms. */
 } AtlasFlightReason;
 
 /** @brief Thresholds. All times in milliseconds; set them before Init. */
@@ -47,6 +53,9 @@ typedef struct
     float descent_rate_m_s;     /**< "Decreasing" means filtered climb rate below -this (default 1 m/s). */
     uint32_t descent_dwell_ms;  /**< COAST -> CHUTE after decreasing this long (default 10 s). */
     uint32_t coast_timeout_ms;  /**< COAST -> CHUTE backstop if the barometer never confirms (default 60 s; 0 = off). */
+    float landed_rate_m_s;      /**< "Steady" means |filtered climb rate| below this (default 1 m/s). */
+    uint32_t landed_dwell_ms;   /**< CHUTE -> LANDED after steady this long (default 10 s). */
+    uint32_t landed_timeout_ms; /**< CHUTE -> LANDED backstop (default 15 min in CHUTE; 0 = off). */
     uint32_t adxl_max_age_ms;   /**< An older ADXL sample breaks a dwell (default 100 ms). */
     uint32_t baro_max_age_ms;   /**< An older barometer sample breaks a descent (default 500 ms). */
     float ground_tau_s;         /**< Pad pressure reference averaging time constant (default 5 s). */
@@ -74,7 +83,8 @@ typedef struct
     uint32_t phase_since_ms;       /**< Tick the current phase began. */
     uint32_t launch_ms;            /**< Tick ENGINE_ON began (0 before launch). */
     uint32_t dwell_since_ms;       /**< Start of the current boost/burnout candidate. */
-    uint32_t descent_since_ms;     /**< Start of the current descent candidate. */
+    uint32_t descent_since_ms;     /**< Start of the current descent (or, in CHUTE, steady) candidate. */
+    uint32_t apogee_ms;            /**< Tick of the highest altitude after launch (0 before launch). */
     uint32_t last_adxl_ms, last_baro_ms;
     float accel_g;                 /**< Latest ADXL magnitude. */
     float ground_pa;               /**< Pad reference pressure (frozen at launch). */

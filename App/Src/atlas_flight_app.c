@@ -10,9 +10,12 @@
  *    ENGINE_ON switches the estimator to gyro + magnetometer.
  * 3. Steps the canard roll controller, enabled only in COAST; CHUTE neutralizes the
  *    canards and stops their PWM signal 20 s later.
- * 4. Drives the canard PWM channels (FLIGHT_OUTPUTS_QUALIFIED); they are held at neutral
- *    whenever control is off or outputs are blocked.
- * 5. Sends a telemetry snapshot over the radio about once per second.
+ * 4. Drives the canard PWM channels (FLIGHT_OUTPUTS_QUALIFIED): only FLIGHT_ROLL_CANARD
+ *    follows the controller; the other three, and all four whenever control is off or
+ *    outputs are blocked, are held at neutral.
+ * 5. Beeps the buzzer every 2 s once LANDED.
+ * 6. Appends a snapshot to the SD card (FLTnnnn.BIN, one file per boot) every 100 ms.
+ * 7. Sends a telemetry snapshot over the radio about once per second.
  *
  * Major functions: AtlasRtos_ApplicationStep() (overrides the weak hook).
  */
@@ -20,13 +23,17 @@
 #if !ATLAS_BRINGUP
 #include <math.h>
 #include <string.h>
+#include "atlas_buzzer.h"
 #include "atlas_canard.h"
 #include "atlas_flight.h"
 #include "atlas_flight_estimator.h"
 #include "atlas_io.h"
 #include "atlas_rtos.h"
+#include "atlas_stabilization.h"
+#include "atlas_storage.h"
 #include "atlas_telemetry.h"
 #include "atlas_time.h"
+#include "fatfs.h"
 #include "stm32h7xx_hal.h"
 
 /* ---------------------------------------------------------------------------------------
@@ -43,11 +50,15 @@
 #define FLIGHT_CANARDS 4U
 /** Zero-based PWM channels driving the canards: PCB PWM 7, 8, 1, 2 (same as the bench). */
 static const uint8_t flight_channel[FLIGHT_CANARDS] = {6U, 7U, 0U, 1U};
+/** CHECK BEFORE LAUNCH: the one canard (index into flight_channel, 0 = PWM 7) that does roll
+ * control. The other three are always held at their flight_pwm[] neutral (0 deg). */
+#define FLIGHT_ROLL_CANARD 0U
 /** Canard azimuths (body +X toward +Y). Roll-only coupled control gives every canard the same
  * deflection, so these only matter if pitch/yaw control is enabled later. */
 static const float flight_azimuth_deg[FLIGHT_CANARDS] = {0.0f, 90.0f, 180.0f, 270.0f};
-/** CHECK BEFORE LAUNCH: per-canard direction (+1/-1) so all four push against a spin. Use the
- * ServoBench roll test: a channel with its Reverse bit set needs -1 here. */
+/** CHECK BEFORE LAUNCH: per-canard direction (+1/-1) so a canard pushes against a spin. Use the
+ * ServoBench roll test: a channel with its Reverse bit set needs -1 here. Only the
+ * FLIGHT_ROLL_CANARD entry moves a canard in flight. */
 static const float flight_direction[FLIGHT_CANARDS] = {1.0f, 1.0f, 1.0f, 1.0f};
 /** CHECK ON PAD: minimum/neutral/maximum pulse of each canard linkage (KST: 10 us/deg,
  * 1500 us = 0 deg). The canard controller itself stays within +-5 deg (1450-1550 us). */
@@ -57,7 +68,12 @@ static const AtlasPwmCalibration flight_pwm[FLIGHT_CANARDS] = {
 #define FLIGHT_IMU_BATCH 32U
 #define FLIGHT_RADIO_CHUNK 50U  /* 50 bytes at 57600 baud = 8.7 ms, under the 10 ms TX limit. */
 #define FLIGHT_TM_PROFILE 2U    /* TM_PROFILE: 0 bringup, 1 ServoBench, 2 flight. */
-#define FLIGHT_TM_VERSION 0x020000U
+#define FLIGHT_TM_VERSION 0x020200U
+#define FLIGHT_BEEP_PERIOD_MS 2000U /* LANDED heartbeat: one beep every 2 s... */
+#define FLIGHT_BEEP_MS 200U         /* ...200 ms long at the buzzer's resonant frequency. */
+#define FLIGHT_LOG_PERIOD_MS 100U   /* SD log: one 512-byte snapshot every 100 ms (5 KB/s, 18 MB/h)... */
+#define FLIGHT_LOG_RETRY_MS 1000U   /* ...an unmounted card is re-mounted at most this often... */
+#define FLIGHT_LOG_MAX_FILE 9999U   /* ...and the last file name is appended once all are used. */
 
 static bool flight_started;
 static AtlasFlight flight;
@@ -76,6 +92,29 @@ static AtlasRtosHealth rtos_health;
 static uint32_t output_attempt_ms;
 static bool output_config_sent, output_signal_off;
 static uint32_t step_us, step_max_us; /* Duration of this hook (last, worst) vs its 10 ms period. */
+static uint32_t beep_ms;
+static uint32_t snapshot_words[ATLAS_TM_WORDS]; /* Shared by radio and SD snapshots (same task). */
+
+/** SD flight log state (flight_log_step). */
+typedef enum { FLIGHT_LOG_FIND = 0, FLIGHT_LOG_RUN } FlightLogState;
+static struct
+{
+    FlightLogState state;
+    uint16_t file;                      /* FLTnnnn.BIN number being probed, then written. */
+    uint32_t outstanding;               /* Requests submitted and not yet completed. */
+    uint32_t due_ms, mount_ms;
+    uint32_t written, failed, dropped;  /* Records appended, append errors, records not submitted. */
+} flight_log;
+static AtlasStorageRequest log_request;
+static AtlasStorageResult log_result;
+static AtlasStorageHealth log_health;
+
+/** @brief Log file name FLTnnnn.BIN. @param name Result (13 bytes). @param n File number. */
+static void flight_log_name(char name[13], uint16_t n)
+{
+    memcpy(name, "FLT0000.BIN", 12U);
+    for (unsigned i = 6U; i >= 3U; --i) { name[i] = (char)('0' + n % 10U); n /= 10U; }
+}
 
 /** Calibration word (telemetry TM_BNO_IO) bits; the ground waits for CAL_READY before launch. */
 #define CAL_STARTED     (1U << 0) /* Fusion has an initial attitude. */
@@ -96,7 +135,10 @@ static void flight_canard_config(AtlasCanardConfig *c)
         c->canard[i].servo_center_us = (float)flight_pwm[i].neutral_us;
         c->canard[i].servo_us_per_deg = 10.0f * flight_direction[i]; /* KST X10: 10 us/deg. */
     }
-    c->canard_area_m2 = 0.00275f;            /* GUESS: 27.5 cm^2 each. */
+    /* GUESS: 27.5 cm^2 each. The controller assumes all four canards deflect together; only
+     * FLIGHT_ROLL_CANARD does, so a quarter of the area makes it command the deflection one
+     * canard needs for the same roll moment (still capped at max_deflection_deg). */
+    c->canard_area_m2 = 0.00275f / (float)FLIGHT_CANARDS;
     c->canard_lift_slope_per_rad = 2.0f;     /* GUESS: replace with CFD. */
     c->canard_arm_m = 0.95f;                 /* GUESS. */
     c->canard_radius_m = 0.10f;              /* GUESS. */
@@ -134,7 +176,12 @@ static void flight_start(uint32_t now_ms)
     (void)AtlasFlight_Init(&flight, &fc, now_ms);
     AtlasFlightEstimatorConfig ec;
     AtlasFlightEstimator_DefaultConfig(&ec);
-    ec.use_magnetometer = true; /* false if its axis map/offset are not verified (roll hold may drift) */
+    /* Same magnetometer setting as the stabilization estimator: CMake ATLAS_STAB_USE_MAGNETOMETER
+     * (default OFF) and its unverified axis map/offset. Off, roll is gyro-only after launch. */
+    static const float mag_map[9] = ATLAS_STAB_MAG_TO_IMU, mag_offset[3] = ATLAS_STAB_MAG_OFFSET_GAUSS;
+    ec.use_magnetometer = ATLAS_STAB_USE_MAGNETOMETER != 0;
+    memcpy(ec.mag_to_imu, mag_map, sizeof(mag_map));
+    memcpy(ec.mag_offset_gauss, mag_offset, sizeof(mag_offset));
     (void)AtlasFlightEstimator_Init(&estimator, &ec);
     flight_canard_config(&canard_config);
     canard_configured = AtlasCanard_Init(&canard, &canard_config);
@@ -193,7 +240,7 @@ static void flight_control(void)
     const bool enable = flight.phase == ATLAS_FLIGHT_COAST && estimator_ready_at_launch && canard_mounted;
     AtlasCanardInput in;
     if (!AtlasFlightEstimator_CanardInput(&estimator, AtlasFlightEstimator_Speed(&estimator), enable,
-                                          flight.phase == ATLAS_FLIGHT_CHUTE, &in))
+                                          flight.phase >= ATLAS_FLIGHT_CHUTE, &in))
     {
         canard_valid = false;
         return;
@@ -251,7 +298,7 @@ static void flight_outputs(uint32_t now_ms)
     for (unsigned i = 0U; i < FLIGHT_CANARDS; ++i)
     {
         const AtlasPwmCalibration *p = &flight_pwm[i];
-        uint16_t us = canard_valid ? canard_out.pulse_us[i] : p->neutral_us;
+        uint16_t us = (canard_valid && i == FLIGHT_ROLL_CANARD) ? canard_out.pulse_us[i] : p->neutral_us;
         if (us < p->minimum_us) us = p->minimum_us;
         if (us > p->maximum_us) us = p->maximum_us;
         cmd.arguments.pwm_multi.pulse_us[flight_channel[i]] = us;
@@ -286,12 +333,12 @@ static uint32_t flight_tm(float v, float scale)
     return (isfinite(n) && n > -2147483520.0f && n < 2147483520.0f) ? (uint32_t)(int32_t)n : UINT32_C(0x80000000);
 }
 
-/** @brief Build one telemetry snapshot. Sensor words keep the bench layout; the BNO085
- * words (unused, BNO disabled) carry the flight state. @param s Snapshot. @param now_ms Tick. */
-static void flight_telemetry_begin(const AtlasRtosSnapshot *s, uint32_t now_ms)
+/** @brief Build one snapshot (radio telemetry and SD log share it). Sensor words keep the bench
+ * layout; the BNO085 words (unused, BNO disabled) carry the flight state. The CRC word is left 0.
+ * @param s Snapshot. @param now_ms Tick. @param w Result, ATLAS_TM_WORDS words. */
+static void flight_snapshot(const AtlasRtosSnapshot *s, uint32_t now_ms, uint32_t *w)
 {
-    uint32_t w[ATLAS_TM_WORDS];
-    memset(w, 0, sizeof(w));
+    memset(w, 0, ATLAS_TM_WORDS * sizeof(w[0]));
     w[TM_MAGIC] = ATLAS_TM_MAGIC; w[TM_UPTIME] = now_ms; w[TM_VERSION] = FLIGHT_TM_VERSION;
     w[TM_PROFILE] = FLIGHT_TM_PROFILE;
     w[TM_SAMPLE_STATUS] = s->adxl375_status; w[TM_SAMPLE_STATUS + 1] = s->lsm6dsv16b_status;
@@ -360,13 +407,83 @@ static void flight_telemetry_begin(const AtlasRtosSnapshot *s, uint32_t now_ms)
     w[TM_INIT + 6] = estimator.accel_saturated;
     w[TM_INIT + 7] = (uint32_t)(estimator.pad_still_s * 1000.0f);
     w[TM_INIT + 8] = canard_mounted ? 1U : 0U;
+    w[TM_INIT + 9] = flight.apogee_ms;
+    w[TM_INIT + 10] = FLIGHT_ROLL_CANARD;
     w[TM_STABILIZATION] = estimator.gaps;
     for (unsigned i = 0U; i < 3U; ++i) w[TM_UP + i] = flight_tm(estimator.bias_dps[i], 1000.0f);
     for (unsigned i = 0U; i < 4U; ++i)
         w[TM_PWM + i] = io_snapshot.commanded_pwm_us[2U * i] | ((uint32_t)io_snapshot.commanded_pwm_us[2U * i + 1U] << 16U);
     w[TM_GPIO] = (uint32_t)io_snapshot.pwm_enabled_mask << 17U;
     w[TM_TX_PACKETS] = telemetry.view.stats.tx_packets;
-    (void)AtlasTelemetry_Begin(&telemetry, w, now_ms);
+    /* SD log status: card/mounted/logging bits and file number; records written, failed, dropped. */
+    w[TM_SD] = (uint32_t)log_health.card_detected | ((uint32_t)log_health.mounted << 1U) |
+        ((uint32_t)(flight_log.state == FLIGHT_LOG_RUN) << 2U) | ((uint32_t)flight_log.file << 16U);
+    w[TM_SD_ERRORS] = flight_log.written; w[TM_SERVICE] = flight_log.failed; w[TM_STARTUP] = flight_log.dropped;
+}
+
+/** @brief Start the next radio telemetry snapshot. @param s Snapshot. @param now_ms Tick. */
+static void flight_telemetry_begin(const AtlasRtosSnapshot *s, uint32_t now_ms)
+{
+    flight_snapshot(s, now_ms, snapshot_words);
+    (void)AtlasTelemetry_Begin(&telemetry, snapshot_words, now_ms);
+}
+
+/** @brief Submit a mount request when the card is present but not mounted (at most once per
+ * FLIGHT_LOG_RETRY_MS). @param now_ms Tick. */
+static void flight_log_mount(uint32_t now_ms)
+{
+    if (!log_health.card_detected || (uint32_t)(now_ms - flight_log.mount_ms) < FLIGHT_LOG_RETRY_MS) return;
+    memset(&log_request, 0, sizeof(log_request));
+    log_request.operation = ATLAS_STORAGE_MOUNT;
+    if (AtlasStorage_Submit(&log_request, NULL) == ATLAS_OK) ++flight_log.outstanding;
+    flight_log.mount_ms = now_ms;
+}
+
+/** @brief SD flight log: find the first unused FLTnnnn.BIN, then append one CRC-checked 512-byte
+ * snapshot (the radio format) every FLIGHT_LOG_PERIOD_MS. Never waits: a missing, full or slow
+ * card only drops records, and the storage owner runs below every flight task.
+ * @param s Snapshot. @param now_ms Tick. */
+static void flight_log_step(const AtlasRtosSnapshot *s, uint32_t now_ms)
+{
+    (void)AtlasStorage_GetHealth(&log_health);
+    while (AtlasStorage_Receive(&log_result)) /* Sole consumer in the flight image. */
+    {
+        if (flight_log.outstanding != 0U) --flight_log.outstanding;
+        if (log_result.operation == ATLAS_STORAGE_APPEND)
+        {
+            if (log_result.status == ATLAS_OK) ++flight_log.written; else ++flight_log.failed;
+        }
+        else if (log_result.operation == ATLAS_STORAGE_READ && flight_log.state == FLIGHT_LOG_FIND)
+        {
+            if (log_result.status == ATLAS_OK && flight_log.file < FLIGHT_LOG_MAX_FILE) ++flight_log.file;
+            else if (log_result.status == ATLAS_OK || log_result.filesystem_result == (uint8_t)FR_NO_FILE)
+                flight_log.state = FLIGHT_LOG_RUN; /* Unused name found (or the last one, appended). */
+        }
+    }
+    if (!log_health.mounted) flight_log_mount(now_ms);
+    if (flight_log.state == FLIGHT_LOG_FIND)
+    {
+        /* One probe at a time: a READ of FLTnnnn.BIN that fails with "no file" picks that name. */
+        if (flight_log.outstanding != 0U || !log_health.mounted) return;
+        memset(&log_request, 0, sizeof(log_request));
+        log_request.operation = ATLAS_STORAGE_READ;
+        flight_log_name(log_request.filename, flight_log.file);
+        log_request.length = 1U;
+        if (AtlasStorage_Submit(&log_request, NULL) == ATLAS_OK) ++flight_log.outstanding;
+        return;
+    }
+    if ((uint32_t)(now_ms - flight_log.due_ms) < FLIGHT_LOG_PERIOD_MS) return;
+    flight_log.due_ms = now_ms;
+    if (!log_health.mounted) { ++flight_log.dropped; return; }
+    flight_snapshot(s, now_ms, snapshot_words);
+    memset(&log_request, 0, sizeof(log_request));
+    log_request.operation = ATLAS_STORAGE_APPEND;
+    flight_log_name(log_request.filename, flight_log.file);
+    log_request.length = ATLAS_STORAGE_DATA_CAPACITY;
+    memcpy(log_request.data, snapshot_words, 4U * TM_CRC); /* Little-endian words, as on the radio. */
+    const uint32_t crc = AtlasTelemetry_Crc(log_request.data, 4U * TM_CRC);
+    memcpy(log_request.data + 4U * TM_CRC, &crc, sizeof(crc));
+    if (AtlasStorage_Submit(&log_request, NULL) == ATLAS_OK) ++flight_log.outstanding; else ++flight_log.dropped;
 }
 
 /** @brief Drain the radio and send the next telemetry packet when due.
@@ -381,6 +498,19 @@ static void flight_telemetry(const AtlasRtosSnapshot *s, uint32_t now_ms)
     AtlasTelemetry_Service(&telemetry, now_ms, flight_radio_send, NULL);
 }
 
+/** @brief LANDED heartbeat for recovery: one beep every FLIGHT_BEEP_PERIOD_MS. A full command
+ * queue just retries on the next step. @param now_ms Tick. */
+static void flight_buzzer(uint32_t now_ms)
+{
+    if (flight.phase != ATLAS_FLIGHT_LANDED || (uint32_t)(now_ms - beep_ms) < FLIGHT_BEEP_PERIOD_MS) return;
+    AtlasRtosCommandRequest r;
+    memset(&r, 0, sizeof(r));
+    r.type = ATLAS_RTOS_COMMAND_BUZZER_BEEP;
+    r.arguments.buzzer.frequency_hz = ATLAS_BUZZER_RESONANT_FREQUENCY_HZ;
+    r.arguments.buzzer.duration_ms = FLIGHT_BEEP_MS;
+    if (AtlasRtos_SubmitCommand(&r, 0U, NULL) == ATLAS_OK) beep_ms = now_ms;
+}
+
 /** @brief 100 Hz flight application. @param snapshot Coherent sensor snapshot. @param now_ms Tick. */
 void AtlasRtos_ApplicationStep(const AtlasRtosSnapshot *snapshot, uint32_t now_ms)
 {
@@ -390,6 +520,8 @@ void AtlasRtos_ApplicationStep(const AtlasRtosSnapshot *snapshot, uint32_t now_m
     flight_transitions(snapshot, now_ms);
     flight_control();
     flight_outputs(now_ms);
+    flight_buzzer(now_ms);
+    flight_log_step(snapshot, now_ms);
     if (telemetry_ready) flight_telemetry(snapshot, now_ms);
     step_us = AtlasTime_NowUs() - start_us;
     if (step_us > step_max_us) step_max_us = step_us;

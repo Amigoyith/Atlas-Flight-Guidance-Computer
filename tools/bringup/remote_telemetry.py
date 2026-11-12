@@ -15,8 +15,62 @@ STATS = ('rx_packets rx_bytes crc_errors header_errors duplicates old_packets '
          'tx_packets tx_bytes tx_errors tx_batches tx_aborted rx_bps payload_bps rx_pps').split()
 
 
+FLIGHT_PROFILE = 2
+FLIGHT_FLAGS = 0x1fff0f          # TM_BNO_ACCURACY bits used by the flight image.
+FLIGHT_CAL_BITS = 0x1f           # TM_BNO_IO calibration bits; progress % in bits 8-15.
+
+
 def uint(value, maximum=0xffffffff):
     return type(value) is int and 0 <= value <= maximum
+
+
+def _signed(n):
+    return None if n == 0x80000000 else n if n < 0x80000000 else n - 0x100000000
+
+
+def decode_flight(w) -> dict:
+    """Map a flight-image snapshot (App/Src/atlas_flight_app.c, TM_PROFILE 2).
+
+    The flight image keeps the direct-sensor words and reuses the BNO085, INIT,
+    COUNT and ERRORS words for flight state; docs/FLIGHT_STATE_MACHINE.md lists them.
+    """
+    flags, cal = w[56], w[118]
+    if (w[48] > 4 or w[49] > 6 or flags & ~FLIGHT_FLAGS or ((flags >> 8) & 255) > 5 or
+            cal & ~(FLIGHT_CAL_BITS | 0xff00) or (cal >> 8) & 255 > 100 or w[13] > 1 or w[15] > 3 or
+            any(n > 13 for n in w[25:29]) or w[106] & ~(255 << 17) or any(w[124:127]) or
+            w[72] & 0xff000000 or (w[72] & 255) > 5 or w[115] & 0xfff8):
+        raise ValueError('Invalid flight snapshot fields')
+    def vector(offset, length=3):
+        return [_signed(n) for n in w[offset:offset + length]]
+    def halfwords(offset, count):
+        return [(w[offset + i // 2] >> (16 * (i % 2))) & 65535 for i in range(count)]
+    return dict(
+        ms=w[1], version=f'{w[2] >> 16}.{(w[2] >> 8) & 255}.{w[2] & 255}', profile='flight',
+        sample_status=list(w[25:29]),
+        adxl=dict(t=w[29], mg=vector(33)), lsm=dict(t=w[30], mg=vector(36), mdps=vector(39)),
+        mmc=dict(t=w[31], nt=vector(43)), baro=dict(t=w[32], pa=_signed(w[46]), temp_cc=_signed(w[47])),
+        gnss=dict(t=w[70], fix=w[72] & 255, flags=(w[72] >> 8) & 255, sv=(w[72] >> 16) & 255,
+                  lat_e7=_signed(w[73]), lon_e7=_signed(w[74]), h_msl_mm=_signed(w[75]), hacc_mm=w[76],
+                  tow_ms=w[77]),
+        flight=dict(
+            phase=w[48], reason=w[49], phase_ms=w[50], launch_ms=w[51], apogee_ms=w[14], roll_canard=w[15],
+            altitude_cm=_signed(w[52]), climb_cm_s=_signed(w[53]), max_altitude_cm=_signed(w[54]),
+            accel_mg=_signed(w[55]),
+            started=flags & 1, ready=(flags >> 1) & 1, mode=(flags >> 2) & 1, ready_at_launch=(flags >> 3) & 1,
+            canard_state=(flags >> 8) & 255, signal_off=(flags >> 16) & 1, roll_holding=(flags >> 17) & 1,
+            saturated=(flags >> 18) & 1, outputs_qualified=(flags >> 19) & 1, outputs_permitted=(flags >> 20) & 1,
+            speed_cm_s=_signed(w[57]), adxl_axial_mg=_signed(w[58]), cos_tilt_milli=_signed(w[59]),
+            body_rate_mdps=vector(60), deflection_mdeg=_signed(w[63]), authority_milli=_signed(w[64]),
+            dynamic_pressure_pa=_signed(w[65]), q_ppm=vector(66, 4),
+            cal_started=cal & 1, cal_converged=(cal >> 1) & 1, cal_bias_done=(cal >> 2) & 1,
+            cal_ready=(cal >> 3) & 1, still=(cal >> 4) & 1, cal_progress=(cal >> 8) & 255, still_ms=w[119],
+            fault=w[105] & 255, output_block=(w[105] >> 8) & 255,
+            errors=list(w[21:25]), step_us=w[17], step_max_us=w[18], samples=w[19], mag_used=w[20],
+            adxl_pad_mg=vector(5), nose_milli=vector(8), accel_saturated=w[11], pad_still_ms=w[12],
+            canard_mounted=w[13], gaps=w[107], gyro_bias_mdps=vector(108),
+            pwm_mask=(w[106] >> 17) & 255, pulse_us=halfwords(111, 8)),
+        sd=dict(card=w[115] & 1, mounted=(w[115] >> 1) & 1, logging=(w[115] >> 2) & 1, file=w[115] >> 16,
+                written=w[116], failed=w[117], dropped=w[123]))
 
 
 def decode_snapshot(encoded: str) -> dict | None:
@@ -29,6 +83,8 @@ def decode_snapshot(encoded: str) -> dict | None:
     w = struct.unpack('<128I', raw)
     if w[0] != 0x31534c54 or binascii.crc32(raw[:508]) != w[127]:
         raise ValueError('Remote snapshot CRC/schema mismatch')
+    if w[3] == FLIGHT_PROFILE:
+        return decode_flight(w)
     if (w[3] > 1 or w[4] > 255 or any(n > 13 for n in w[5:17]+w[25:29]) or
             any(w[124:127]) or w[123] > 1 or w[83] & ~0x10f or (w[83] & 255) > 13 or
             w[84] > 1023 or w[106] & ~0x3ff7f7f or w[107] & ~0xff070f0f or

@@ -4,7 +4,8 @@
  *
  * Major functions:
  * - AtlasFlight_Step(): dwell-confirmed boost and burnout from |a|, then a barometric
- *   descent dwell (or timeout backstop) ends the coast. Phases never go backwards.
+ *   descent dwell (or timeout backstop) ends the coast, and a steady-altitude dwell (or
+ *   timeout backstop) marks the landing. Phases never go backwards.
  */
 #include "atlas_flight.h"
 #include <math.h>
@@ -21,6 +22,9 @@ void AtlasFlight_DefaultConfig(AtlasFlightConfig *c)
     c->descent_rate_m_s = 1.0f;
     c->descent_dwell_ms = 10000U;
     c->coast_timeout_ms = 60000U;
+    c->landed_rate_m_s = 1.0f;
+    c->landed_dwell_ms = 10000U;
+    c->landed_timeout_ms = 900000U;
     c->adxl_max_age_ms = 100U;
     c->baro_max_age_ms = 500U;
     c->ground_tau_s = 5.0f;
@@ -37,6 +41,7 @@ bool AtlasFlight_Init(AtlasFlight *f, const AtlasFlightConfig *c, uint32_t now_m
     f->phase_since_ms = now_ms;
     if (c == NULL || !(c->boost_accel_g > c->coast_accel_g) || !(c->coast_accel_g > 0.0f) ||
         !(c->descent_rate_m_s >= 0.0f) || c->descent_dwell_ms == 0U || c->adxl_max_age_ms == 0U ||
+        !(c->landed_rate_m_s > 0.0f) || c->landed_dwell_ms == 0U ||
         c->baro_max_age_ms == 0U || !(c->ground_tau_s > 0.0f) ||
         !(c->baro_alpha > 0.0f && c->baro_alpha <= 1.0f) || !(c->baro_beta >= 0.0f && c->baro_beta < 1.0f))
     {
@@ -101,7 +106,11 @@ static void flight_baro(AtlasFlight *f, const AtlasFlightInput *in)
         f->altitude_m = predicted + c->baro_alpha * residual;
         f->climb_m_s += (c->baro_beta / dt) * residual;
     }
-    if (f->altitude_m > f->max_altitude_m) f->max_altitude_m = f->altitude_m;
+    if (f->altitude_m > f->max_altitude_m)
+    {
+        f->max_altitude_m = f->altitude_m;
+        if (f->phase != ATLAS_FLIGHT_PAD) f->apogee_ms = in->baro_ms;
+    }
 }
 
 /** @brief Advance on new samples. @param f State. @param in Inputs. @return Phase after the step. */
@@ -160,6 +169,23 @@ AtlasFlightPhase AtlasFlight_Step(AtlasFlight *f, const AtlasFlightInput *in)
         if (c->coast_timeout_ms != 0U && (uint32_t)(now - f->phase_since_ms) >= c->coast_timeout_ms)
             flight_enter(f, ATLAS_FLIGHT_CHUTE, ATLAS_FLIGHT_REASON_COAST_TIMEOUT, now);
     }
+    else if (f->phase == ATLAS_FLIGHT_CHUTE)
+    {
+        /* Landed: the filtered altitude must stay steady, on fresh samples, for the whole dwell. */
+        const bool baro_fresh = f->baro_filter_ready && (uint32_t)(now - f->last_baro_ms) <= c->baro_max_age_ms;
+        if (baro_fresh && fabsf(f->climb_m_s) < c->landed_rate_m_s)
+        {
+            if (!f->descending) { f->descending = true; f->descent_since_ms = f->last_baro_ms; }
+            if ((uint32_t)(now - f->descent_since_ms) >= c->landed_dwell_ms)
+            {
+                flight_enter(f, ATLAS_FLIGHT_LANDED, ATLAS_FLIGHT_REASON_LANDED_STILL, now);
+                return f->phase;
+            }
+        }
+        else f->descending = false;
+        if (c->landed_timeout_ms != 0U && (uint32_t)(now - f->phase_since_ms) >= c->landed_timeout_ms)
+            flight_enter(f, ATLAS_FLIGHT_LANDED, ATLAS_FLIGHT_REASON_LANDED_TIMEOUT, now);
+    }
     return f->phase;
 }
 
@@ -172,6 +198,7 @@ const char *AtlasFlight_PhaseName(AtlasFlightPhase p)
         case ATLAS_FLIGHT_ENGINE_ON: return "ENGINE_ON";
         case ATLAS_FLIGHT_COAST: return "COAST";
         case ATLAS_FLIGHT_CHUTE: return "CHUTE";
+        case ATLAS_FLIGHT_LANDED: return "LANDED";
         default: return "UNKNOWN";
     }
 }
