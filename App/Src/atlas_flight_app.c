@@ -53,6 +53,12 @@ static const uint8_t flight_channel[FLIGHT_CANARDS] = {6U, 7U, 0U, 1U};
 /** CHECK BEFORE LAUNCH: the one canard (index into flight_channel, 0 = PWM 7) that does roll
  * control. The other three are always held at their flight_pwm[] neutral (0 deg). */
 #define FLIGHT_ROLL_CANARD 0U
+/** CMake ATLAS_FLIGHT_ROLL_CONTROL (default ON). OFF: the roll canard is never moved, so all four
+ * canards stay held straight; estimation, phases, logging and telemetry are unchanged. Use it
+ * when the canard direction has not been checked. */
+#ifndef ATLAS_FLIGHT_ROLL_CONTROL
+#define ATLAS_FLIGHT_ROLL_CONTROL 1
+#endif
 /** Canard azimuths (body +X toward +Y). Roll-only coupled control gives every canard the same
  * deflection, so these only matter if pitch/yaw control is enabled later. */
 static const float flight_azimuth_deg[FLIGHT_CANARDS] = {0.0f, 90.0f, 180.0f, 270.0f};
@@ -237,7 +243,8 @@ static void flight_transitions(const AtlasRtosSnapshot *s, uint32_t now_ms)
 static void flight_control(void)
 {
     if (!canard_configured || estimator.last_us == canard_last_us) return;
-    const bool enable = flight.phase == ATLAS_FLIGHT_COAST && estimator_ready_at_launch && canard_mounted;
+    const bool enable = ATLAS_FLIGHT_ROLL_CONTROL && flight.phase == ATLAS_FLIGHT_COAST &&
+                        estimator_ready_at_launch && canard_mounted;
     AtlasCanardInput in;
     if (!AtlasFlightEstimator_CanardInput(&estimator, AtlasFlightEstimator_Speed(&estimator), enable,
                                           flight.phase >= ATLAS_FLIGHT_CHUTE, &in))
@@ -298,7 +305,8 @@ static void flight_outputs(uint32_t now_ms)
     for (unsigned i = 0U; i < FLIGHT_CANARDS; ++i)
     {
         const AtlasPwmCalibration *p = &flight_pwm[i];
-        uint16_t us = (canard_valid && i == FLIGHT_ROLL_CANARD) ? canard_out.pulse_us[i] : p->neutral_us;
+        uint16_t us = (ATLAS_FLIGHT_ROLL_CONTROL && canard_valid && i == FLIGHT_ROLL_CANARD) ?
+            canard_out.pulse_us[i] : p->neutral_us;
         if (us < p->minimum_us) us = p->minimum_us;
         if (us > p->maximum_us) us = p->maximum_us;
         cmd.arguments.pwm_multi.pulse_us[flight_channel[i]] = us;

@@ -138,6 +138,8 @@ There is no prior flight data, so this image goes straight onto the rocket. Do t
 **Build and flash**
 1. Build the flight image: `cmake --preset Release` then `cmake --build --preset Release`. Program `build/Release/Atlas.hex` over factory USB DFU exactly as in [startup](startup.md#4-program-the-stm32-over-usb-dfu) (BOOT0 high, STM32CubeProgrammer). The flight image has no USB maintenance mode, so the dashboard cannot update it; returning to a bench image also needs BOOT0 DFU.
 
+**If the canard direction was not checked:** flash the held-straight image instead: `cmake --preset Release -B build/ReleaseNeutral -DATLAS_FLIGHT_ROLL_CONTROL=OFF` then `cmake --build build/ReleaseNeutral`, and program `build/ReleaseNeutral/Atlas.hex`. All four canards stay held straight for the whole flight; phases, estimation, SD log, telemetry and the landed buzzer are unchanged. A reversed roll canard would add spin instead of removing it, so never fly active control unchecked.
+
 **Canard direction and trim (with the ServoBench roll test, before flashing the flight image)**
 
 2. Mount the board in the rocket as it will fly. Flash ServoBench with `-DATLAS_CANARD_ROLL_TEST=ON` ([Canard control](CANARD_CONTROL.md#roll-damp-and-hold-test-servobench)), calibrate with the rocket standing nose-up, and spin it by hand about its long axis. Set Reverse on any channel whose canard moves with the spin.

@@ -28,6 +28,7 @@ option(ATLAS_SERVO_BENCH "Allow bounded, explicitly enabled servo tests (pyro in
 option(ATLAS_STAB_USE_MAGNETOMETER "Feed the MMC5983MA to the stabilization estimator for pre-launch heading (axis map and hard-iron offset must be verified first)" OFF)
 option(ATLAS_USE_BNO085 "Probe, sample and require the BNO085 (off: not used by any function)" OFF)
 option(ATLAS_CANARD_ROLL_TEST "ServoBench stabilization drives the canard roll-rate damp-and-hold test instead of gravity pointing" OFF)
+option(ATLAS_FLIGHT_ROLL_CONTROL "Flight image moves the roll canard in COAST (off: all four canards held straight; everything else unchanged)" ON)
 if(ATLAS_SERVO_BENCH AND NOT ATLAS_BRINGUP)
     message(FATAL_ERROR "ServoBench requires ATLAS_BRINGUP=ON")
 endif()
@@ -132,6 +133,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     ATLAS_SERVO_BENCH=$<BOOL:${ATLAS_SERVO_BENCH}>
     ATLAS_STAB_USE_MAGNETOMETER=$<BOOL:${ATLAS_STAB_USE_MAGNETOMETER}>
     ATLAS_CANARD_ROLL_TEST=$<BOOL:${ATLAS_CANARD_ROLL_TEST}>
+    ATLAS_FLIGHT_ROLL_CONTROL=$<BOOL:${ATLAS_FLIGHT_ROLL_CONTROL}>
     ATLAS_USE_BNO085=$<BOOL:${ATLAS_USE_BNO085}>
 )
 
